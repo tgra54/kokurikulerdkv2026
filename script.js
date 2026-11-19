@@ -1,0 +1,1588 @@
+/* =====================================================================
+   PROJECT KOKURIKULER 3D – PEMILAHAN SAMPAH
+   Three.js (WebGL) • low-poly • procedural (tanpa file model wajib)
+   ===================================================================== */
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+/* ---------------------------------------------------------------------
+   0. UTIL
+--------------------------------------------------------------------- */
+const $ = (s) => document.querySelector(s);
+const rand = (a, b) => a + Math.random() * (b - a);
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const lerp = (a, b, t) => a + (b - a) * t;
+const easeInOut = (t) => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
+const easeOut = (t) => 1 - Math.pow(1 - t, 3);
+const shuffle = (arr) => {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+};
+const isCoarse = window.matchMedia('(pointer: coarse)').matches;
+
+/* ---------------------------------------------------------------------
+   1. DATA KATEGORI & SAMPAH
+--------------------------------------------------------------------- */
+const ORDER = ['organik', 'anorganik', 'kertas', 'b3', 'residu'];
+
+const CATEGORIES = {
+  organik: {
+    label: 'ORGANIK', title: 'ORGANIK', hex: 0x2e9e4f, css: '#2e9e4f', colorName: 'HIJAU', icon: '🍃',
+    desc: 'Sampah alami yang mudah terurai dan dapat diolah menjadi kompos.',
+    tail: 'termasuk sampah organik yang mudah terurai dan dapat dijadikan kompos.',
+  },
+  anorganik: {
+    label: 'ANORGANIK', title: 'ANORGANIK / DAUR ULANG', hex: 0xf2b705, css: '#f2b705', colorName: 'KUNING', icon: '♻',
+    desc: 'Sampah non-organik yang masih dapat digunakan kembali atau didaur ulang.',
+    tail: 'termasuk sampah anorganik yang dapat didaur ulang.',
+  },
+  kertas: {
+    label: 'KERTAS', title: 'KERTAS', hex: 0x2f7de1, css: '#2f7de1', colorName: 'BIRU', icon: '📄',
+    desc: 'Kertas, kardus, majalah, dan koran bekas yang dapat didaur ulang.',
+    tail: 'termasuk sampah kertas yang dapat didaur ulang.',
+  },
+  b3: {
+    label: 'B3 / BERBAHAYA', title: 'B3 / BERBAHAYA', hex: 0xd93636, css: '#d93636', colorName: 'MERAH', icon: '⚠',
+    desc: 'Bahan Berbahaya dan Beracun harus dipisahkan dan ditangani secara khusus.',
+    tail: 'termasuk limbah B3 yang harus dipisahkan dan ditangani secara khusus.',
+  },
+  residu: {
+    label: 'RESIDU', title: 'RESIDU', hex: 0x4a4f57, css: '#4a4f57', colorName: 'ABU-ABU', icon: '🗑',
+    desc: 'Sampah sisa yang tidak dapat didaur ulang maupun dikomposkan.',
+    tail: 'termasuk sampah residu yang tidak dapat didaur ulang maupun dikomposkan.',
+  },
+};
+
+const PRES_INFO = {
+  organik: ['Kulit pisang', 'Apel', 'Daun', 'Sisa sayuran', 'Sisa makanan'],
+  anorganik: ['Botol plastik', 'Kaleng', 'Kemasan plastik', 'Botol minuman', 'Wadah plastik'],
+  kertas: ['Koran', 'Kardus', 'Majalah', 'Kertas', 'Buku bekas'],
+  b3: ['Baterai bekas', 'Lampu neon', 'Obat kedaluwarsa', 'Wadah bahan kimia', 'Limbah medis'],
+  residu: ['Tisu bekas', 'Popok sekali pakai', 'Pembalut', 'Puntung rokok', 'Sampah sisa'],
+};
+
+// Daftar 25 sampah (5 per kategori). "key" = nama fungsi pembuat model 3D.
+const ITEM_DEFS = [
+  { cat: 'organik', key: 'kulit_pisang', name: 'Kulit pisang' },
+  { cat: 'organik', key: 'apel', name: 'Apel' },
+  { cat: 'organik', key: 'daun', name: 'Daun' },
+  { cat: 'organik', key: 'sayuran', name: 'Sisa sayuran' },
+  { cat: 'organik', key: 'sisa_makanan', name: 'Sisa makanan' },
+
+  { cat: 'anorganik', key: 'botol_plastik', name: 'Botol plastik' },
+  { cat: 'anorganik', key: 'kaleng', name: 'Kaleng' },
+  { cat: 'anorganik', key: 'kemasan_plastik', name: 'Kemasan plastik' },
+  { cat: 'anorganik', key: 'botol_minuman', name: 'Botol minuman' },
+  { cat: 'anorganik', key: 'wadah_plastik', name: 'Wadah plastik' },
+
+  { cat: 'kertas', key: 'koran', name: 'Koran' },
+  { cat: 'kertas', key: 'kardus', name: 'Kardus' },
+  { cat: 'kertas', key: 'majalah', name: 'Majalah' },
+  { cat: 'kertas', key: 'kertas', name: 'Kertas' },
+  { cat: 'kertas', key: 'buku', name: 'Buku bekas' },
+
+  { cat: 'b3', key: 'baterai', name: 'Baterai bekas' },
+  { cat: 'b3', key: 'lampu_neon', name: 'Lampu neon' },
+  { cat: 'b3', key: 'obat', name: 'Obat kedaluwarsa' },
+  { cat: 'b3', key: 'bahan_kimia', name: 'Wadah bahan kimia' },
+  { cat: 'b3', key: 'limbah_medis', name: 'Limbah medis' },
+
+  { cat: 'residu', key: 'tisu', name: 'Tisu bekas' },
+  { cat: 'residu', key: 'popok', name: 'Popok sekali pakai' },
+  { cat: 'residu', key: 'pembalut', name: 'Pembalut' },
+  { cat: 'residu', key: 'puntung', name: 'Puntung rokok' },
+  { cat: 'residu', key: 'sampah_sisa', name: 'Sampah sisa' },
+];
+
+// Karakter animasi masuk tiap kategori
+const CAT_FX = {
+  organik:   { fly: 0.75, drop: 0.40, spin: Math.PI * 3.5, wobble: 0 },
+  anorganik: { fly: 0.80, drop: 0.40, spin: Math.PI * 5,   wobble: 0 },
+  kertas:    { fly: 1.30, drop: 0.55, spin: Math.PI * 2.4, wobble: 0.38 }, // melayang + berputar
+  b3:        { fly: 1.60, drop: 0.70, spin: Math.PI * 0.6, wobble: 0 },    // lebih lambat
+  residu:    { fly: 0.85, drop: 0.40, spin: Math.PI * 3,   wobble: 0 },
+};
+
+/* Opsional: ganti model procedural dengan file GLB/GLTF ringan.
+   Contoh: { apel: 'assets/models/apel.glb' }  (butuh dijalankan lewat server) */
+const GLB_OVERRIDES = {};
+
+/* ---------------------------------------------------------------------
+   2. RENDERER, SCENE, KAMERA
+--------------------------------------------------------------------- */
+const app = $('#app');
+const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, isCoarse ? 1.5 : 1.75));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.0;
+app.appendChild(renderer.domElement);
+renderer.domElement.addEventListener('contextmenu', (e) => e.preventDefault());
+
+const scene = new THREE.Scene();
+scene.fog = new THREE.Fog(0xcfe9f7, 48, 120);
+
+// Langit gradasi
+{
+  const c = document.createElement('canvas'); c.width = 4; c.height = 256;
+  const g = c.getContext('2d');
+  const gr = g.createLinearGradient(0, 0, 0, 256);
+  gr.addColorStop(0, '#5aa9e6'); gr.addColorStop(0.6, '#a9d8f5'); gr.addColorStop(1, '#e8f6fb');
+  g.fillStyle = gr; g.fillRect(0, 0, 4, 256);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  scene.background = t;
+}
+
+const camera = new THREE.PerspectiveCamera(52, window.innerWidth / window.innerHeight, 0.1, 220);
+const CAM_START = { pos: new THREE.Vector3(0, 7.4, 16.5), target: new THREE.Vector3(0, 0.7, 3.4) };
+camera.position.copy(CAM_START.pos);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.copy(CAM_START.target);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.minDistance = 3.5;
+controls.maxDistance = 42;
+controls.minPolarAngle = 0.12;
+controls.maxPolarAngle = Math.PI / 2 - 0.04;
+controls.zoomSpeed = 0.9;
+controls.update();
+
+// Cahaya
+const hemi = new THREE.HemisphereLight(0xe3f3ff, 0x5f7f3d, 1.15);
+scene.add(hemi);
+const sun = new THREE.DirectionalLight(0xfff1d6, 2.6);
+sun.position.set(14, 22, 14);
+sun.target.position.set(0, 0, 3);
+sun.castShadow = true;
+sun.shadow.mapSize.set(isCoarse ? 1024 : 2048, isCoarse ? 1024 : 2048);
+sun.shadow.camera.left = -22; sun.shadow.camera.right = 22;
+sun.shadow.camera.top = 22; sun.shadow.camera.bottom = -22;
+sun.shadow.camera.near = 1; sun.shadow.camera.far = 80;
+sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.03;
+scene.add(sun, sun.target);
+
+// Refleksi lembut untuk material bin (ringan, dibuat sekali)
+{
+  const pm = new THREE.PMREMGenerator(renderer);
+  scene.environment = pm.fromScene(new RoomEnvironment(), 0.04).texture;
+  scene.environmentIntensity = 0.4;
+  pm.dispose();
+}
+
+// Satu lampu efek (dipakai ulang: kilatan peringatan B3, dll.)
+const fxLight = new THREE.PointLight(0xff3030, 0, 7, 2);
+scene.add(fxLight);
+
+/* ---------------------------------------------------------------------
+   3. HELPER MATERIAL / GEOMETRI / TEKSTUR
+--------------------------------------------------------------------- */
+const S = (color, o = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.6, metalness: 0, ...o });
+const L = (color, o = {}) => new THREE.MeshLambertMaterial({ color, ...o });
+const mesh = (geo, mat, x = 0, y = 0, z = 0, rx = 0, ry = 0, rz = 0) => {
+  const m = new THREE.Mesh(geo, mat);
+  m.position.set(x, y, z);
+  m.rotation.set(rx, ry, rz);
+  return m;
+};
+const box = (w, h, d, mat, x = 0, y = 0, z = 0) => mesh(new THREE.BoxGeometry(w, h, d), mat, x, y, z);
+const cyl = (rt, rb, h, mat, x = 0, y = 0, z = 0, seg = 16) => mesh(new THREE.CylinderGeometry(rt, rb, h, seg), mat, x, y, z);
+const sph = (r, mat, x = 0, y = 0, z = 0, ws = 14, hs = 10) => mesh(new THREE.SphereGeometry(r, ws, hs), mat, x, y, z);
+
+function canvasTex(w, h, draw) {
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  const g = c.getContext('2d');
+  draw(g, w, h);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 4;
+  return t;
+}
+function roundRect(g, x, y, w, h, r) {
+  g.beginPath();
+  g.moveTo(x + r, y);
+  g.arcTo(x + w, y, x + w, y + h, r);
+  g.arcTo(x + w, y + h, x, y + h, r);
+  g.arcTo(x, y + h, x, y, r);
+  g.arcTo(x, y, x + w, y, r);
+  g.closePath();
+}
+function shadowize(obj, cast = true, receive = true) {
+  obj.traverse((o) => { if (o.isMesh) { o.castShadow = cast; o.receiveShadow = receive; } });
+  return obj;
+}
+
+/* ---------------------------------------------------------------------
+   4. LINGKUNGAN SEKOLAH
+--------------------------------------------------------------------- */
+const envAnim = { trees: [], clouds: [], flag: null, grassU: { value: 0 } };
+
+function buildGround() {
+  // Rumput
+  const grassTex = canvasTex(256, 256, (g, w, h) => {
+    g.fillStyle = '#62ae4e'; g.fillRect(0, 0, w, h);
+    for (let i = 0; i < 2600; i++) {
+      g.fillStyle = `hsla(${92 + Math.random() * 28},48%,${34 + Math.random() * 22}%,.35)`;
+      g.fillRect(Math.random() * w, Math.random() * h, 2, 2 + Math.random() * 3);
+    }
+  });
+  grassTex.wrapS = grassTex.wrapT = THREE.RepeatWrapping;
+  grassTex.repeat.set(36, 36);
+  const ground = mesh(new THREE.PlaneGeometry(180, 180), L(0xffffff, { map: grassTex }), 0, 0, 0, -Math.PI / 2);
+  ground.receiveShadow = true;
+  scene.add(ground);
+
+  // Paving plaza (area sampah & sampah)
+  const tileTex = canvasTex(256, 256, (g, w, h) => {
+    g.fillStyle = '#dcd5c6'; g.fillRect(0, 0, w, h);
+    g.strokeStyle = 'rgba(120,110,95,.45)'; g.lineWidth = 3;
+    for (let i = 0; i <= 4; i++) {
+      g.beginPath(); g.moveTo(i * 64, 0); g.lineTo(i * 64, h); g.stroke();
+      g.beginPath(); g.moveTo(0, i * 64); g.lineTo(w, i * 64); g.stroke();
+    }
+    for (let i = 0; i < 400; i++) { g.fillStyle = `rgba(120,110,95,${Math.random() * 0.08})`; g.fillRect(Math.random() * w, Math.random() * h, 6, 6); }
+  });
+  tileTex.wrapS = tileTex.wrapT = THREE.RepeatWrapping;
+  tileTex.repeat.set(7, 4);
+  const plaza = box(26, 0.06, 15.5, L(0xffffff, { map: tileTex }), 0, 0.03, 4.75);
+  plaza.receiveShadow = true;
+  scene.add(plaza);
+
+  // Jalan setapak menuju gedung (bata)
+  const brickTex = canvasTex(128, 128, (g, w, h) => {
+    g.fillStyle = '#c98f6b'; g.fillRect(0, 0, w, h);
+    g.strokeStyle = '#9b6548'; g.lineWidth = 3;
+    for (let y = 0; y < 4; y++) {
+      g.beginPath(); g.moveTo(0, y * 32); g.lineTo(w, y * 32); g.stroke();
+      for (let x = 0; x < 4; x++) { const o = y % 2 ? 16 : 0; g.beginPath(); g.moveTo(x * 32 + o, y * 32); g.lineTo(x * 32 + o, y * 32 + 32); g.stroke(); }
+    }
+  });
+  brickTex.wrapS = brickTex.wrapT = THREE.RepeatWrapping;
+  brickTex.repeat.set(3, 9);
+  const path = box(4.6, 0.06, 14.5, L(0xffffff, { map: brickTex }), 0, 0.03, -10.3);
+  path.receiveShadow = true;
+  scene.add(path);
+
+  // Platform area tempat sampah
+  const pad = box(16.4, 0.16, 3.6, S(0xb9b3a6, { roughness: 0.9 }), 0, 0.08, -0.1);
+  pad.receiveShadow = true; pad.castShadow = true;
+  scene.add(pad);
+}
+
+function buildSchool() {
+  const g = new THREE.Group();
+  g.position.set(0, 0, -22);
+  const wall = L(0xf3e3c3), roofM = L(0xb4533b), trim = L(0xe6cf9f);
+  const glass = new THREE.MeshStandardMaterial({ color: 0x7ec8ee, roughness: 0.2, metalness: 0.3, emissive: 0x1b3a52, emissiveIntensity: 0.35 });
+
+  g.add(box(30, 6.5, 9, wall, 0, 3.25, 0));
+  g.add(box(31, 0.5, 10, roofM, 0, 6.75, 0));
+  g.add(box(9, 10.5, 9.5, wall, 0, 5.25, 0.25));
+  g.add(box(10, 0.6, 10.5, roofM, 0, 10.8, 0.25));
+  const cone = mesh(new THREE.ConeGeometry(7.2, 2.6, 4), roofM, 0, 12.4, 0.25, 0, Math.PI / 4, 0);
+  g.add(cone);
+  g.add(box(31, 0.35, 0.3, trim, 0, 0.18, 4.6));
+
+  // Jendela (instancing → ringan)
+  const wGeo = new THREE.BoxGeometry(1.6, 1.7, 0.15);
+  const spots = [];
+  [-13, -10, -7, 7, 10, 13].forEach((x) => { spots.push([x, 2.3, 4.55]); spots.push([x, 4.9, 4.55]); });
+  [-2.4, 2.4].forEach((x) => { spots.push([x, 6.7, 5.05]); spots.push([x, 8.9, 5.05]); });
+  const wins = new THREE.InstancedMesh(wGeo, glass, spots.length);
+  const m4 = new THREE.Matrix4();
+  spots.forEach((p, i) => { m4.makeTranslation(p[0], p[1], p[2]); wins.setMatrixAt(i, m4); });
+  g.add(wins);
+
+  // Jam, pintu, tangga, papan nama
+  g.add(mesh(new THREE.CylinderGeometry(1, 1, 0.15, 24), S(0xffffff), 0, 9.2, 5.1, Math.PI / 2, 0, 0));
+  g.add(box(0.08, 0.7, 0.05, S(0x222222), 0, 9.4, 5.2));
+  g.add(box(3.2, 3.6, 0.15, trim, 0, 1.8, 5.0));
+  g.add(box(2.6, 3.2, 0.2, S(0x2d4a86), 0, 1.6, 5.05));
+  g.add(box(0.06, 3.2, 0.22, trim, 0, 1.6, 5.1));
+  g.add(box(5.4, 0.2, 1.5, S(0xcfc7b6), 0, 0.1, 5.8));
+  const sign = canvasTex(512, 96, (c, w, h) => {
+    c.fillStyle = '#0f5b45'; roundRect(c, 0, 0, w, h, 16); c.fill();
+    c.fillStyle = '#fff'; c.font = '800 46px Poppins, Arial, sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle';
+    c.fillText('SEKOLAH HIJAU', w / 2, h / 2 + 3);
+  });
+  g.add(mesh(new THREE.PlaneGeometry(6, 1.125), new THREE.MeshBasicMaterial({ map: sign }), 0, 4.6, 5.08));
+
+  // Tiang bendera + bendera berkibar
+  g.add(cyl(0.07, 0.09, 8, S(0xdddddd), 8, 4, 8, 8));
+  const flagGeo = new THREE.PlaneGeometry(2.4, 1.5, 12, 6);
+  const flagTex = canvasTex(64, 64, (c, w, h) => { c.fillStyle = '#d8232a'; c.fillRect(0, 0, w, h / 2); c.fillStyle = '#ffffff'; c.fillRect(0, h / 2, w, h / 2); });
+  const flag = new THREE.Mesh(flagGeo, new THREE.MeshLambertMaterial({ map: flagTex, side: THREE.DoubleSide }));
+  flag.position.set(9.2, 7.1, 8);
+  flag.userData.base = flagGeo.attributes.position.array.slice();
+  g.add(flag);
+  envAnim.flag = flag;
+
+  scene.add(g);
+}
+
+function makeTree(x, z, s = 1, pine = false) {
+  const g = new THREE.Group();
+  g.position.set(x, 0, z); g.scale.setScalar(s);
+  g.add(cyl(0.2, 0.3, 1.8, L(0x7a5230), 0, 0.9, 0, 7));
+  const fol = new THREE.Group(); fol.position.y = 1.5;
+  const greens = [0x3f9b4a, 0x4aa857, 0x358c43];
+  if (pine) {
+    for (let i = 0; i < 3; i++) fol.add(mesh(new THREE.ConeGeometry(1.5 - i * 0.35, 1.7, 7), L(greens[i]), 0, 0.9 + i * 1.0, 0));
+  } else {
+    fol.add(mesh(new THREE.IcosahedronGeometry(1.5, 0), L(greens[0], { flatShading: true }), 0, 1.4, 0));
+    fol.add(mesh(new THREE.IcosahedronGeometry(1.1, 0), L(greens[1], { flatShading: true }), 0.7, 2.2, 0.2));
+    fol.add(mesh(new THREE.IcosahedronGeometry(1.0, 0), L(greens[2], { flatShading: true }), -0.7, 2.0, -0.3));
+  }
+  g.add(fol);
+  shadowize(g, true, false);
+  scene.add(g);
+  envAnim.trees.push({ fol, phase: Math.random() * 6.28, amp: 0.018 + Math.random() * 0.012 });
+}
+
+function makeBush(x, z, s = 1, flowers = false) {
+  const g = new THREE.Group(); g.position.set(x, 0, z);
+  const m = mesh(new THREE.IcosahedronGeometry(0.6 * s, 0), L(0x3d9a4b, { flatShading: true }), 0, 0.4 * s, 0);
+  m.scale.set(1.3, 0.85, 1.1); g.add(m);
+  if (flowers) {
+    const cols = [0xff6f91, 0xffd166, 0xffffff];
+    for (let i = 0; i < 6; i++) g.add(sph(0.07, L(cols[i % 3]), rand(-0.6, 0.6) * s, 0.45 * s + rand(0, 0.35) * s, rand(-0.4, 0.5) * s, 6, 4));
+  }
+  shadowize(g, true, false);
+  scene.add(g);
+}
+
+function makeBench(x, z, ry) {
+  const g = new THREE.Group(); g.position.set(x, 0.06, z); g.rotation.y = ry;
+  const wood = S(0x9a6b3c, { roughness: 0.8 }), metal = S(0x3a3f45, { metalness: 0.5, roughness: 0.5 });
+  g.add(box(1.9, 0.08, 0.55, wood, 0, 0.55, 0));
+  const back = box(1.9, 0.5, 0.07, wood, 0, 0.95, -0.25); back.rotation.x = -0.15; g.add(back);
+  [-0.8, 0.8].forEach((px) => { g.add(box(0.07, 0.55, 0.5, metal, px, 0.27, 0)); g.add(box(0.07, 0.6, 0.07, metal, px, 0.8, -0.27)); });
+  scene.add(shadowize(g));
+}
+
+function makeLamp(x, z) {
+  const g = new THREE.Group(); g.position.set(x, 0.06, z);
+  const metal = S(0x2f3a40, { metalness: 0.5, roughness: 0.5 });
+  g.add(cyl(0.07, 0.1, 3.4, metal, 0, 1.7, 0, 8));
+  g.add(cyl(0.2, 0.2, 0.15, metal, 0, 0.08, 0, 10));
+  g.add(box(0.5, 0.06, 0.06, metal, 0.2, 3.35, 0));
+  g.add(sph(0.2, new THREE.MeshStandardMaterial({ color: 0xfff1b5, emissive: 0xffe08a, emissiveIntensity: 1.2 }), 0.42, 3.22, 0, 12, 8));
+  g.add(cyl(0.02, 0.26, 0.14, metal, 0.42, 3.46, 0, 10));
+  scene.add(shadowize(g, true, false));
+}
+
+function buildInfoBoard() {
+  const g = new THREE.Group();
+  g.position.set(-10.6, 0.06, 0.4); g.rotation.y = 0.55;
+  const wood = S(0x7b5632, { roughness: 0.8 });
+  g.add(box(0.14, 2.6, 0.14, wood, -1.7, 1.3, -0.1));
+  g.add(box(0.14, 2.6, 0.14, wood, 1.7, 1.3, -0.1));
+  g.add(box(3.9, 2.7, 0.14, S(0x1f6f5a), 0, 2.45, 0));
+  const tex = canvasTex(1024, 700, (c, w, h) => {
+    c.fillStyle = '#fffaf0'; roundRect(c, 24, 24, w - 48, h - 48, 28); c.fill();
+    c.fillStyle = '#0f5b45'; roundRect(c, 24, 24, w - 48, 120, 28); c.fill();
+    c.fillStyle = '#fff'; c.font = '800 62px Poppins, Arial, sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle';
+    c.fillText('5 JENIS TEMPAT SAMPAH', w / 2, 88);
+    const rows = [
+      ['organik', 'HIJAU = ORGANIK', 'sisa makanan, daun'],
+      ['anorganik', 'KUNING = ANORGANIK', 'plastik, kaleng'],
+      ['kertas', 'BIRU = KERTAS', 'koran, kardus'],
+      ['b3', 'MERAH = B3', 'baterai, lampu neon'],
+      ['residu', 'ABU-ABU = RESIDU', 'tisu, puntung rokok'],
+    ];
+    rows.forEach((r, i) => {
+      const y = 200 + i * 94;
+      c.fillStyle = CATEGORIES[r[0]].css; c.beginPath(); c.arc(100, y, 30, 0, 6.283); c.fill();
+      c.strokeStyle = 'rgba(0,0,0,.25)'; c.lineWidth = 4; c.stroke();
+      c.fillStyle = '#12333a'; c.textAlign = 'left'; c.font = '800 46px Poppins, Arial, sans-serif';
+      c.fillText(r[1], 160, y - 8);
+      c.fillStyle = '#5a7378'; c.font = '600 28px Poppins, Arial, sans-serif';
+      c.fillText(r[2], 162, y + 28);
+    });
+  });
+  g.add(mesh(new THREE.PlaneGeometry(3.7, 2.53), new THREE.MeshBasicMaterial({ map: tex }), 0, 2.45, 0.08));
+  scene.add(shadowize(g, true, false));
+}
+
+function buildSortingArea() {
+  // Pagar tanaman di belakang tempat sampah + papan nama area
+  const hedge = box(17, 0.95, 0.8, L(0x2f8a43), 0, 0.55, -2.4);
+  hedge.castShadow = true; hedge.receiveShadow = true;
+  scene.add(hedge);
+  const g = new THREE.Group(); g.position.set(0, 0, -2.5);
+  const wood = S(0x7b5632, { roughness: 0.8 });
+  g.add(box(0.14, 3, 0.14, wood, -3.6, 1.5, 0));
+  g.add(box(0.14, 3, 0.14, wood, 3.6, 1.5, 0));
+  const tex = canvasTex(1024, 140, (c, w, h) => {
+    c.fillStyle = '#0f5b45'; roundRect(c, 0, 0, w, h, 24); c.fill();
+    c.fillStyle = '#fff'; c.font = '800 70px Poppins, Arial, sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle';
+    c.fillText('AREA PEMILAHAN SAMPAH', w / 2, h / 2 + 4);
+  });
+  g.add(mesh(new THREE.PlaneGeometry(7.4, 1.01), new THREE.MeshBasicMaterial({ map: tex }), 0, 2.75, 0.08));
+  g.add(box(7.5, 1.1, 0.1, wood, 0, 2.75, 0));
+  scene.add(shadowize(g, true, false));
+}
+
+function buildGrassAndSky() {
+  // Rumput bergoyang (InstancedMesh + vertex shader ringan)
+  const bladeGeo = new THREE.ConeGeometry(0.05, 0.5, 3, 1, true); bladeGeo.translate(0, 0.25, 0);
+  const mat = new THREE.MeshLambertMaterial({ color: 0xffffff, side: THREE.DoubleSide });
+  mat.onBeforeCompile = (sh) => {
+    sh.uniforms.uTime = envAnim.grassU;
+    sh.vertexShader = 'uniform float uTime;\n' + sh.vertexShader.replace(
+      '#include <begin_vertex>',
+      `vec3 transformed = vec3(position);
+       vec4 ip = instanceMatrix * vec4(0.,0.,0.,1.);
+       float sw = sin(uTime*1.7 + ip.x*0.6 + ip.z*0.4);
+       transformed.x += sw * 0.14 * max(position.y, 0.0) / 0.5;`
+    );
+  };
+  const COUNT = isCoarse ? 450 : 800;
+  const blades = new THREE.InstancedMesh(bladeGeo, mat, COUNT);
+  const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), col = new THREE.Color();
+  let n = 0, guard = 0;
+  while (n < COUNT && guard++ < 9000) {
+    const x = rand(-32, 32), z = rand(-16, 22);
+    if (Math.abs(x) < 14 && z > -3.5 && z < 13) continue;     // plaza
+    if (Math.abs(x) < 3.2 && z < -3) continue;                // jalan setapak
+    if (Math.abs(x) < 9 && z < -2 && z > -3.6) continue;      // pagar
+    const s = rand(0.7, 1.5);
+    e.set(0, rand(0, 6.28), 0); q.setFromEuler(e);
+    m4.compose(new THREE.Vector3(x, 0, z), q, new THREE.Vector3(s, s * rand(0.8, 1.4), s));
+    blades.setMatrixAt(n, m4);
+    col.setHSL(rand(0.24, 0.34), 0.55, rand(0.32, 0.5)); blades.setColorAt(n, col);
+    n++;
+  }
+  blades.count = n;
+  scene.add(blades);
+
+  // Bukit jauh
+  [[-40, -70, 34, 11], [10, -78, 44, 14], [52, -66, 30, 9]].forEach(([x, z, w, h]) => {
+    const m = mesh(new THREE.IcosahedronGeometry(1, 1), L(0x7fb069, { flatShading: true }), x, 0, z);
+    m.scale.set(w, h, 14); scene.add(m);
+  });
+
+  // Awan bergerak pelan
+  for (let i = 0; i < 6; i++) {
+    const c = new THREE.Group();
+    const wm = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.92, fog: false });
+    [[0, 0, 0, 3], [2.6, -0.3, 0.4, 2.3], [-2.6, -0.4, 0, 2.2], [0.8, 0.8, -0.3, 2.2]].forEach((p) => c.add(sph(p[3], wm, p[0], p[1], p[2], 8, 6)));
+    c.scale.set(1.4, 0.6, 1);
+    c.position.set(rand(-70, 70), rand(26, 38), rand(-60, -25));
+    c.userData.speed = rand(0.4, 1.0);
+    scene.add(c); envAnim.clouds.push(c);
+  }
+}
+
+function buildEnvironment() {
+  buildGround();
+  buildSchool();
+  buildSortingArea();
+  buildInfoBoard();
+
+  [[-16, -2, 1.1], [-19, 6, 1.25, 1], [-15, 12, 1], [16, -3, 1.2], [19, 5, 1.1, 1], [15.5, 12, 1.0],
+   [-25, -9, 1.3], [25, -9, 1.3, 1], [-9, -12, 1.0], [9, -12, 1.0, 1], [-22, 16, 1.2], [22, 16, 1.2, 1]]
+    .forEach(([x, z, s, p]) => makeTree(x, z, s, !!p));
+
+  [[-12.5, 3, 1.1, true], [12.5, 3, 1.1, true], [-5.5, -13, 1.2], [5.5, -13, 1.2, true], [-13.8, 9, 1], [13.8, 9, 1],
+   [-8, -2.2, 0.8, true], [8, -2.2, 0.8, true]].forEach(([x, z, s, f]) => makeBush(x, z, s, !!f));
+
+  makeBench(-10, 8, Math.PI / 2);
+  makeBench(10, 8, -Math.PI / 2);
+  makeBench(-4.2, -9, Math.PI / 2);
+  makeBench(4.2, -9, -Math.PI / 2);
+
+  [[-11.8, 12], [11.8, 12], [-11.8, 1.5], [11.8, 1.5], [-3.3, -6], [3.3, -6]].forEach(([x, z]) => makeLamp(x, z));
+
+  buildGrassAndSky();
+}
+
+/* ---------------------------------------------------------------------
+   5. TEMPAT SAMPAH 3D (5 buah)
+--------------------------------------------------------------------- */
+const bins = [];
+const BIN_Y = 0.16;
+
+function binLabelTex(cat) {
+  const c = CATEGORIES[cat];
+  return canvasTex(512, 256, (g, w, h) => {
+    g.fillStyle = '#ffffff'; roundRect(g, 6, 6, w - 12, h - 12, 34); g.fill();
+    g.lineWidth = 14; g.strokeStyle = c.css; roundRect(g, 6, 6, w - 12, h - 12, 34); g.stroke();
+    g.fillStyle = cat === 'residu' ? '#2f3338' : '#12333a';
+    g.textAlign = 'center'; g.textBaseline = 'middle';
+    const size = c.label.length > 10 ? 62 : 84;
+    g.font = `800 ${size}px Poppins, Arial, sans-serif`;
+    g.fillText(c.label, w / 2, h / 2 + 6);
+  });
+}
+
+function binIconTex(cat) {
+  const c = CATEGORIES[cat];
+  return canvasTex(128, 128, (g, w, h) => {
+    if (cat === 'b3') {
+      // simbol peringatan segitiga
+      g.fillStyle = '#ffd400'; g.strokeStyle = '#1b1b1b'; g.lineWidth = 8; g.lineJoin = 'round';
+      g.beginPath(); g.moveTo(64, 10); g.lineTo(120, 112); g.lineTo(8, 112); g.closePath(); g.fill(); g.stroke();
+      g.fillStyle = '#1b1b1b'; g.font = '800 70px Arial, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.fillText('!', 64, 78);
+    } else {
+      g.fillStyle = 'rgba(255,255,255,.95)'; g.beginPath(); g.arc(64, 64, 58, 0, 6.283); g.fill();
+      g.lineWidth = 8; g.strokeStyle = c.css; g.stroke();
+      g.fillStyle = c.css; g.font = '64px "Segoe UI Emoji","Apple Color Emoji","Noto Color Emoji",Arial,sans-serif';
+      g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.fillText(c.icon, 64, 70);
+    }
+  });
+}
+
+function createBin(cat, x) {
+  const c = CATEGORIES[cat];
+  const g = new THREE.Group();
+  g.position.set(x, BIN_Y, 0);
+
+  const bodyMat = new THREE.MeshStandardMaterial({ color: c.hex, roughness: 0.42, metalness: 0.12 });
+  bodyMat.emissive = new THREE.Color(c.hex); bodyMat.emissiveIntensity = 0;
+  const darkMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(c.hex).multiplyScalar(0.55), roughness: 0.5, metalness: 0.15 });
+
+  // Base + body (container)
+  g.add(cyl(0.63, 0.66, 0.1, darkMat, 0, 0.05, 0, 24));
+  g.add(cyl(0.72, 0.58, 1.3, bodyMat, 0, 0.75, 0, 24));
+  g.add(mesh(new THREE.TorusGeometry(0.67, 0.035, 8, 28), darkMat, 0, 0.2, 0, Math.PI / 2));
+  // Sisi dalam gelap (terlihat lewat lubang)
+  g.add(mesh(new THREE.CircleGeometry(0.42, 20), new THREE.MeshBasicMaterial({ color: 0x080808 }), 0, 1.415, 0, -Math.PI / 2));
+
+  // Tutup dengan lubang
+  const shape = new THREE.Shape(); shape.absarc(0, 0, 0.77, 0, Math.PI * 2, false);
+  const hole = new THREE.Path(); hole.absarc(0, 0, 0.4, 0, Math.PI * 2, true); shape.holes.push(hole);
+  const lidGeo = new THREE.ExtrudeGeometry(shape, { depth: 0.1, bevelEnabled: true, bevelSize: 0.02, bevelThickness: 0.02, bevelSegments: 2, curveSegments: 24 });
+  lidGeo.rotateX(-Math.PI / 2);
+  g.add(mesh(lidGeo, darkMat, 0, 1.4, 0));
+
+  // Flap penutup lubang (berengsel di belakang)
+  const flap = new THREE.Group(); flap.position.set(0, 1.56, -0.5);
+  flap.add(cyl(0.5, 0.5, 0.05, bodyMat, 0, 0, 0.5, 24));
+  flap.add(sph(0.06, darkMat, 0, 0.06, 0.85, 8, 6));
+  g.add(flap);
+
+  // Label kategori (melengkung mengikuti body)
+  const len = 1.7;
+  const labelGeo = new THREE.CylinderGeometry(0.689, 0.635, 0.5, 24, 1, true, -len / 2, len);
+  g.add(mesh(labelGeo, new THREE.MeshStandardMaterial({ map: binLabelTex(cat), roughness: 0.5 }), 0, 0.75, 0));
+
+  // Ikon / simbol di atas label
+  const iconPlane = mesh(new THREE.PlaneGeometry(cat === 'b3' ? 0.5 : 0.38, cat === 'b3' ? 0.5 : 0.38),
+    new THREE.MeshBasicMaterial({ map: binIconTex(cat), transparent: true }), 0, cat === 'b3' ? 1.13 : 1.17, 0.73);
+  g.add(iconPlane);
+
+  shadowize(g);
+  scene.add(g);
+
+  // Cincin sorot di lantai (feedback saat sampah mendekat / presentasi)
+  const ring = mesh(new THREE.RingGeometry(0.95, 1.15, 40), new THREE.MeshBasicMaterial({ color: c.hex, transparent: true, opacity: 0, depthWrite: false }), x, 0.175, 0, -Math.PI / 2);
+  scene.add(ring);
+
+  const bin = {
+    cat, group: g, flap, ring, bodyMat,
+    open: 0, openTarget: 0, hold: 0, wiggle: 0, shake: 0, glow: 0, near: 0,
+    baseX: x, phase: Math.random() * 6.28,
+  };
+  bins.push(bin);
+  return bin;
+}
+
+/* ---------------------------------------------------------------------
+   6. MODEL SAMPAH 3D (procedural, low-poly)
+--------------------------------------------------------------------- */
+function thinBox(w, h, d, topMap, sideColor, topColor = 0xffffff) {
+  const side = S(sideColor, { roughness: 0.85 });
+  const top = S(topColor, { roughness: 0.8, map: topMap || null });
+  return new THREE.Mesh(new THREE.BoxGeometry(w, h, d), [side, side, top, side, side, side]);
+}
+const paperTex = (lines, bg = '#fdfdfb') => canvasTex(128, 160, (g, w, h) => {
+  g.fillStyle = bg; g.fillRect(0, 0, w, h);
+  g.fillStyle = 'rgba(40,60,90,.35)';
+  for (let y = 16; y < h - 8; y += lines) g.fillRect(10, y, w - 20 - Math.random() * 30, 3);
+});
+
+const BUILD = {
+  /* ---------- ORGANIK ---------- */
+  kulit_pisang() {
+    const g = new THREE.Group(); const yel = S(0xf1d23c, { roughness: 0.55 });
+    for (let i = 0; i < 3; i++) {
+      const arm = new THREE.Group(); arm.rotation.y = (i * Math.PI * 2) / 3;
+      const p = sph(0.2, yel, 0.26, 0.11, 0, 12, 8); p.scale.set(1.5, 0.28, 0.6); p.rotation.z = -0.3;
+      arm.add(p);
+      arm.add(sph(0.035, S(0x5a3b17), 0.4, 0.06, 0.05, 6, 4));
+      g.add(arm);
+    }
+    g.add(cyl(0.04, 0.05, 0.16, S(0x6b4a1d), 0, 0.12, 0, 8));
+    return g;
+  },
+  apel() {
+    const g = new THREE.Group();
+    const a = sph(0.26, S(0xd62828, { roughness: 0.35 }), 0, 0.25, 0, 16, 12); a.scale.y = 0.92; g.add(a);
+    g.add(cyl(0.015, 0.02, 0.12, S(0x5a3a1a), 0, 0.53, 0, 6));
+    const l = sph(0.09, S(0x3f9b3f), 0.1, 0.56, 0, 8, 6); l.scale.set(1.6, 0.25, 0.8); l.rotation.z = 0.4; g.add(l);
+    return g;
+  },
+  daun() {
+    const g = new THREE.Group(); const gm = S(0x4aa34a); const gm2 = S(0x6cbf5a);
+    const l1 = sph(0.3, gm, 0, 0.05, 0, 12, 6); l1.scale.set(1.2, 0.1, 0.55); l1.rotation.y = 0.4; g.add(l1);
+    const l2 = sph(0.26, gm2, 0.2, 0.09, 0.22, 12, 6); l2.scale.set(1.1, 0.1, 0.5); l2.rotation.y = -0.9; l2.rotation.z = 0.1; g.add(l2);
+    const l3 = sph(0.22, gm, -0.15, 0.08, -0.2, 12, 6); l3.scale.set(1.1, 0.1, 0.5); l3.rotation.y = 1.9; g.add(l3);
+    g.add(box(0.6, 0.015, 0.02, S(0x2e7d32), 0, 0.105, 0).rotateY(0.4));
+    return g;
+  },
+  sayuran() {
+    const g = new THREE.Group();
+    g.add(cyl(0.07, 0.1, 0.3, S(0x9ccc65), 0, 0.15, 0, 8));
+    const gm = S(0x2e8b3d, { flatShading: true });
+    [[0, 0.42, 0, 0.2], [0.14, 0.36, 0.08, 0.15], [-0.14, 0.37, 0.05, 0.15], [0.04, 0.38, -0.14, 0.15], [-0.06, 0.5, 0.06, 0.13]]
+      .forEach(([x, y, z, r]) => g.add(mesh(new THREE.IcosahedronGeometry(r, 0), gm, x, y, z)));
+    return g;
+  },
+  sisa_makanan() {
+    const g = new THREE.Group();
+    const meat = sph(0.2, S(0xa35a22, { roughness: 0.7 }), 0, 0.2, 0, 12, 8); meat.scale.set(1, 0.85, 1.35); g.add(meat);
+    const bone = cyl(0.04, 0.04, 0.3, S(0xf5efe0), 0.02, 0.2, 0.35, 8); bone.rotation.x = Math.PI / 2; g.add(bone);
+    g.add(sph(0.06, S(0xf5efe0), 0.06, 0.2, 0.5, 8, 6));
+    g.add(sph(0.06, S(0xf5efe0), -0.03, 0.2, 0.5, 8, 6));
+    [[-0.3, 0.05, -0.15], [-0.22, 0.04, -0.28], [-0.36, 0.05, -0.28]].forEach(([x, y, z]) => { const r = sph(0.08, S(0xffffff), x, y, z, 8, 6); r.scale.y = 0.6; g.add(r); });
+    return g;
+  },
+
+  /* ---------- ANORGANIK ---------- */
+  botol_plastik() {
+    const g = new THREE.Group(); const pl = S(0x9fd8f2, { transparent: true, opacity: 0.7, roughness: 0.12 });
+    g.add(cyl(0.13, 0.13, 0.42, pl, 0, 0.22, 0, 14));
+    g.add(cyl(0.05, 0.13, 0.12, pl, 0, 0.49, 0, 14));
+    g.add(cyl(0.05, 0.05, 0.1, pl, 0, 0.6, 0, 10));
+    g.add(cyl(0.058, 0.058, 0.06, S(0x1e6fd0), 0, 0.68, 0, 10));
+    g.add(cyl(0.134, 0.134, 0.14, S(0xffffff), 0, 0.25, 0, 14));
+    return g;
+  },
+  kaleng() {
+    const g = new THREE.Group();
+    g.add(cyl(0.15, 0.15, 0.4, S(0xc9ced4, { metalness: 0.85, roughness: 0.28 }), 0, 0.2, 0, 16));
+    g.add(cyl(0.152, 0.152, 0.14, S(0xd23a3a, { metalness: 0.5, roughness: 0.4 }), 0, 0.2, 0, 16));
+    g.add(cyl(0.155, 0.15, 0.03, S(0x8b9097, { metalness: 0.9, roughness: 0.3 }), 0, 0.41, 0, 16));
+    g.add(cyl(0.12, 0.12, 0.02, S(0xaeb4ba, { metalness: 0.9, roughness: 0.3 }), 0, 0.42, 0, 16));
+    return g;
+  },
+  kemasan_plastik() {
+    const g = new THREE.Group();
+    const tex = canvasTex(128, 192, (c, w, h) => {
+      c.fillStyle = '#f08a24'; c.fillRect(0, 0, w, h);
+      c.fillStyle = '#ffd23f'; c.beginPath(); c.arc(64, 96, 38, 0, 6.283); c.fill();
+      c.fillStyle = '#c0392b'; c.font = '800 26px Arial'; c.textAlign = 'center'; c.fillText('SNACK', 64, 106);
+    });
+    const front = mesh(new THREE.BoxGeometry(0.46, 0.62, 0.09), [S(0xe07a1a), S(0xe07a1a), S(0xe07a1a), S(0xe07a1a), S(0xffffff, { map: tex, metalness: 0.2, roughness: 0.4 }), S(0xe07a1a)], 0, 0.33, 0);
+    g.add(front);
+    g.add(box(0.5, 0.05, 0.05, S(0xc86a12), 0, 0.66, 0));
+    g.add(box(0.5, 0.05, 0.05, S(0xc86a12), 0, 0.02, 0));
+    g.rotation.x = -0.12;
+    return g;
+  },
+  botol_minuman() {
+    const g = new THREE.Group(); const gl = S(0x4fb36b, { transparent: true, opacity: 0.72, roughness: 0.1 });
+    g.add(cyl(0.1, 0.1, 0.46, gl, 0, 0.25, 0, 14));
+    g.add(cyl(0.045, 0.1, 0.14, gl, 0, 0.55, 0, 14));
+    g.add(cyl(0.045, 0.045, 0.1, gl, 0, 0.67, 0, 10));
+    g.add(cyl(0.052, 0.052, 0.05, S(0xe6b422), 0, 0.74, 0, 10));
+    g.add(cyl(0.102, 0.102, 0.16, S(0xd33a2c), 0, 0.28, 0, 14));
+    return g;
+  },
+  wadah_plastik() {
+    const g = new THREE.Group(); const pl = S(0xf4f4ef, { transparent: true, opacity: 0.82, roughness: 0.2 });
+    g.add(cyl(0.27, 0.2, 0.22, pl, 0, 0.12, 0, 16));
+    g.add(cyl(0.28, 0.28, 0.035, S(0xff9a3c, { transparent: true, opacity: 0.85 }), 0, 0.25, 0, 16));
+    g.add(box(0.1, 0.03, 0.06, S(0xff9a3c), 0.3, 0.27, 0));
+    return g;
+  },
+
+  /* ---------- KERTAS ---------- */
+  koran() {
+    const g = new THREE.Group();
+    const tex = canvasTex(128, 160, (c, w, h) => {
+      c.fillStyle = '#e4e0d4'; c.fillRect(0, 0, w, h);
+      c.fillStyle = '#222'; c.font = '800 22px Georgia, serif'; c.textAlign = 'center'; c.fillText('KORAN', 64, 28);
+      c.fillRect(8, 36, w - 16, 3);
+      c.fillStyle = 'rgba(30,30,30,.55)';
+      for (let y = 48; y < h - 8; y += 8) { c.fillRect(8, y, 52, 3); c.fillRect(68, y, 52, 3); }
+      c.fillStyle = '#9aa'; c.fillRect(8, 48, 52, 28);
+    });
+    for (let i = 0; i < 3; i++) { const p = thinBox(0.66, 0.02, 0.5, i === 2 ? tex : null, 0xdad6c8, i === 2 ? 0xffffff : 0xe4e0d4); p.position.y = 0.012 + i * 0.022; p.rotation.y = (i - 1) * 0.18; g.add(p); }
+    return g;
+  },
+  kardus() {
+    const g = new THREE.Group(); const br = S(0xb98a55, { roughness: 0.9 });
+    g.add(box(0.5, 0.34, 0.4, br, 0, 0.17, 0));
+    g.add(box(0.1, 0.012, 0.42, S(0xd9b88a, { roughness: 0.4 }), 0, 0.347, 0));
+    g.add(box(0.5, 0.01, 0.01, S(0x8e6538), 0, 0.345, 0.1));
+    g.add(box(0.5, 0.01, 0.01, S(0x8e6538), 0, 0.345, -0.1));
+    g.rotation.y = 0.25;
+    return g;
+  },
+  majalah() {
+    const g = new THREE.Group();
+    const tex = canvasTex(128, 168, (c, w, h) => {
+      c.fillStyle = '#ff6f91'; c.fillRect(0, 0, w, h);
+      c.fillStyle = '#ffd166'; c.fillRect(0, 0, w, 34);
+      c.fillStyle = '#7b1e3a'; c.font = '800 20px Arial'; c.textAlign = 'center'; c.fillText('MAJALAH', 64, 25);
+      c.fillStyle = '#2f7de1'; c.beginPath(); c.arc(64, 94, 34, 0, 6.283); c.fill();
+      c.fillStyle = '#fff'; c.fillRect(14, 140, 100, 5); c.fillRect(14, 150, 70, 5);
+    });
+    const m = thinBox(0.46, 0.04, 0.6, tex, 0xf4f1ea); m.position.y = 0.022; m.rotation.y = 0.2; g.add(m);
+    return g;
+  },
+  kertas() {
+    const g = new THREE.Group();
+    for (let i = 0; i < 5; i++) { const p = thinBox(0.52, 0.015, 0.7, i === 4 ? paperTex(14) : null, 0xf3f3ee); p.position.y = 0.01 + i * 0.016; p.rotation.y = (i - 2) * 0.12; g.add(p); }
+    return g;
+  },
+  buku() {
+    const g = new THREE.Group(); const cover = S(0x274690, { roughness: 0.6 });
+    g.add(box(0.42, 0.02, 0.56, cover, 0, 0.01, 0));
+    g.add(box(0.42, 0.02, 0.56, cover, 0, 0.13, 0));
+    g.add(box(0.03, 0.14, 0.56, cover, -0.195, 0.07, 0));
+    g.add(box(0.36, 0.1, 0.52, S(0xf6f0dc, { roughness: 0.9 }), 0.01, 0.07, 0));
+    g.add(box(0.2, 0.002, 0.14, S(0xffd166), 0.02, 0.141, 0.1));
+    g.rotation.y = -0.3;
+    return g;
+  },
+
+  /* ---------- B3 ---------- */
+  baterai() {
+    const g = new THREE.Group();
+    g.add(cyl(0.1, 0.1, 0.4, S(0x2b2f33, { metalness: 0.5, roughness: 0.4 }), 0, 0.2, 0, 14));
+    g.add(cyl(0.102, 0.102, 0.26, S(0xe9742c, { metalness: 0.3 }), 0, 0.2, 0, 14));
+    g.add(cyl(0.04, 0.04, 0.05, S(0xc9ced4, { metalness: 0.9, roughness: 0.3 }), 0, 0.425, 0, 10));
+    g.add(box(0.07, 0.016, 0.02, S(0xffffff), 0, 0.24, 0.103));
+    return g;
+  },
+  lampu_neon() {
+    const g = new THREE.Group();
+    g.add(cyl(0.05, 0.05, 0.9, S(0xf4f9ff, { transparent: true, opacity: 0.8, emissive: 0x9fb8cc, emissiveIntensity: 0.35, roughness: 0.2 }), 0, 0.47, 0, 12));
+    g.add(cyl(0.058, 0.058, 0.05, S(0x8b9097, { metalness: 0.8 }), 0, 0.03, 0, 10));
+    g.add(cyl(0.058, 0.058, 0.05, S(0x8b9097, { metalness: 0.8 }), 0, 0.93, 0, 10));
+    g.rotation.z = 0.22;
+    return g;
+  },
+  obat() {
+    const g = new THREE.Group();
+    g.add(cyl(0.1, 0.1, 0.28, S(0xe08a1e, { transparent: true, opacity: 0.85, roughness: 0.2 }), -0.12, 0.14, 0, 14));
+    g.add(cyl(0.105, 0.105, 0.06, S(0xffffff), -0.12, 0.31, 0, 14));
+    g.add(cyl(0.101, 0.101, 0.12, S(0xffffff), -0.12, 0.15, 0, 14));
+    const bx = box(0.24, 0.08, 0.17, S(0xf5f5f5), 0.16, 0.04, 0.02);
+    g.add(bx);
+    g.add(box(0.1, 0.082, 0.04, S(0xd93636), 0.16, 0.04, 0.02));
+    return g;
+  },
+  bahan_kimia() {
+    const g = new THREE.Group();
+    const bodyM = S(0x5d7f9a, { roughness: 0.45 });
+    g.add(box(0.34, 0.42, 0.2, bodyM, 0, 0.21, 0));
+    g.add(box(0.1, 0.1, 0.18, bodyM, 0.1, 0.46, 0));
+    g.add(cyl(0.045, 0.05, 0.05, S(0xffc400), -0.08, 0.46, 0, 10));
+    const tex = canvasTex(128, 128, (c, w, h) => {
+      c.fillStyle = '#fff'; c.fillRect(0, 0, w, h);
+      c.save(); c.translate(64, 64); c.rotate(Math.PI / 4); c.fillStyle = '#d93636'; c.fillRect(-42, -42, 84, 84); c.restore();
+      c.fillStyle = '#fff'; c.font = '800 64px Arial'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText('!', 64, 70);
+    });
+    g.add(mesh(new THREE.PlaneGeometry(0.2, 0.2), new THREE.MeshBasicMaterial({ map: tex }), 0, 0.22, 0.102));
+    return g;
+  },
+  limbah_medis() {
+    const g = new THREE.Group();
+    g.add(box(0.32, 0.34, 0.26, S(0xc0392b, { roughness: 0.5 }), 0, 0.17, 0));
+    g.add(box(0.34, 0.05, 0.28, S(0xf1c40f), 0, 0.365, 0));
+    g.add(box(0.14, 0.012, 0.03, S(0x111111), 0, 0.395, 0));
+    g.add(box(0.14, 0.04, 0.005, S(0xffffff), 0, 0.17, 0.132));
+    g.add(box(0.04, 0.14, 0.005, S(0xffffff), 0, 0.17, 0.132));
+    return g;
+  },
+
+  /* ---------- RESIDU ---------- */
+  tisu() {
+    const g = new THREE.Group(); const m = S(0xf2f2ee, { roughness: 0.95, flatShading: true });
+    [[0, 0.12, 0, 0.14], [0.12, 0.09, 0.07, 0.1], [-0.1, 0.09, 0.05, 0.1], [0.02, 0.08, -0.12, 0.09]]
+      .forEach(([x, y, z, r]) => g.add(mesh(new THREE.IcosahedronGeometry(r, 0), m, x, y, z, rand(0, 3), rand(0, 3), 0)));
+    return g;
+  },
+  popok() {
+    const g = new THREE.Group();
+    g.add(box(0.5, 0.07, 0.3, S(0xf7f7f7, { roughness: 0.9 }), 0, 0.045, 0));
+    g.add(box(0.5, 0.075, 0.07, S(0x7ec8e8), 0, 0.047, 0));
+    g.add(box(0.1, 0.05, 0.14, S(0xffe066), 0.27, 0.05, 0.02));
+    g.add(box(0.1, 0.05, 0.14, S(0xffe066), -0.27, 0.05, 0.02));
+    const waist = box(0.5, 0.1, 0.06, S(0xeaf6fc), 0, 0.07, -0.17); waist.rotation.x = 0.4; g.add(waist);
+    return g;
+  },
+  pembalut() {
+    const g = new THREE.Group();
+    const pad = mesh(new THREE.CapsuleGeometry(0.07, 0.5, 4, 10), S(0xffffff, { roughness: 0.9 }), 0, 0.04, 0, 0, 0, Math.PI / 2);
+    pad.scale.set(1, 1, 0.55); g.add(pad);
+    [-0.04, 0.04].forEach((z) => { const w = sph(0.1, S(0xffffff, { roughness: 0.9 }), 0, 0.035, z * 3.4, 10, 6); w.scale.set(1, 0.18, 0.8); g.add(w); });
+    g.add(box(0.28, 0.01, 0.045, S(0xffb7d5), 0, 0.075, 0));
+    return g;
+  },
+  puntung() {
+    const g = new THREE.Group();
+    const a = cyl(0.04, 0.04, 0.16, S(0xf8f6ee), 0, 0, 0, 10); a.rotation.z = Math.PI / 2;
+    const f = cyl(0.041, 0.041, 0.12, S(0xe0902f), -0.14, 0, 0, 10); f.rotation.z = Math.PI / 2;
+    const t = cyl(0.04, 0.036, 0.03, S(0x555555), 0.095, 0, 0, 10); t.rotation.z = Math.PI / 2;
+    [a, f, t].forEach((m) => g.add(m));
+    const wrap = new THREE.Group(); wrap.add(g);
+    g.scale.setScalar(1.6); g.position.y = 0.068; wrap.rotation.y = 0.5; // diperbesar agar mudah diambil
+    return wrap;
+  },
+  sampah_sisa() {
+    const g = new THREE.Group();
+    g.add(mesh(new THREE.DodecahedronGeometry(0.2, 0), S(0xa9a9b0, { metalness: 0.35, roughness: 0.4, flatShading: true }), 0, 0.18, 0));
+    g.add(mesh(new THREE.TetrahedronGeometry(0.12, 0), S(0xd9d9d9, { metalness: 0.3, flatShading: true }), 0.22, 0.09, 0.08));
+    g.add(mesh(new THREE.TetrahedronGeometry(0.1, 0), S(0xc08a3c, { flatShading: true }), -0.2, 0.08, -0.08, 0.5, 1, 0));
+    g.add(mesh(new THREE.TetrahedronGeometry(0.09, 0), S(0x6a8f3a, { flatShading: true }), 0.05, 0.07, -0.22, 1, 0.3, 0));
+    return g;
+  },
+};
+
+/* ---------- Outline & highlight ---------- */
+const outlineMat = new THREE.MeshBasicMaterial({ color: 0xffe14d, side: THREE.BackSide });
+outlineMat.userData.shared = true;
+
+function addOutlines(group) {
+  const list = [];
+  group.traverse((o) => { if (o.isMesh && !o.userData.outline) list.push(o); });
+  list.forEach((m) => {
+    const o = new THREE.Mesh(m.geometry, outlineMat);
+    o.position.copy(m.position); o.quaternion.copy(m.quaternion);
+    o.scale.copy(m.scale).multiplyScalar(1.14);
+    o.userData.outline = true; o.visible = false;
+    m.parent.add(o);
+  });
+}
+function collectMats(group) {
+  const set = new Set();
+  group.traverse((o) => { if (o.isMesh && !o.userData.outline) (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => set.add(m)); });
+  return [...set].filter((m) => m.emissive);
+}
+function setOutline(item, on) {
+  if (item.outlineOn === on) return;
+  item.outlineOn = on;
+  item.group.traverse((o) => { if (o.userData.outline) o.visible = on; });
+}
+const GLOW = new THREE.Color(0xffd86b);
+function setItemGlow(item, v) {
+  if (Math.abs(item.glow - v) < 0.004) return;
+  item.glow = v;
+  for (const m of item.mats) {
+    if (!m.userData.e0) m.userData.e0 = m.emissive.clone();
+    m.emissive.copy(m.userData.e0).lerp(GLOW, v * 0.5);
+  }
+}
+
+const gltfLoader = new GLTFLoader();
+function applyGLB(item) {
+  const path = GLB_OVERRIDES[item.key];
+  if (!path) return;
+  gltfLoader.load(path, (gltf) => {
+    const model = gltf.scene;
+    const bb = new THREE.Box3().setFromObject(model);
+    const size = bb.getSize(new THREE.Vector3());
+    model.scale.setScalar(0.6 / Math.max(size.x, size.y, size.z, 0.001));
+    bb.setFromObject(model);
+    model.position.y -= bb.min.y;
+    shadowize(model, true, false);
+    [...item.group.children].forEach((c) => item.group.remove(c));
+    item.group.add(model);
+    addOutlines(item.group);
+    item.mats = collectMats(item.group);
+    item.outlineOn = false;
+  }, undefined, () => console.warn('GLB tidak ditemukan, memakai model bawaan:', path));
+}
+
+/* ---------------------------------------------------------------------
+   7. SISTEM PERMAINAN
+--------------------------------------------------------------------- */
+const state = { started: false, finished: false, score: 0, correct: 0, wrong: 0 };
+let items = [];
+const SLOT_COLS = 6, SLOT_ROWS = 5;
+const DRAG_Y = 1.7;
+
+function disposeItem(item) {
+  scene.remove(item.group);
+  item.group.traverse((o) => {
+    if (o.isMesh) {
+      if (!o.userData.outline) o.geometry.dispose();
+      const mats = Array.isArray(o.material) ? o.material : [o.material];
+      mats.forEach((m) => { if (!m.userData.shared) { if (m.map) m.map.dispose(); m.dispose(); } });
+    }
+  });
+}
+
+function newGame() {
+  items.forEach(disposeItem);
+  items = [];
+  hovered = null; dragging = null;
+  controls.enabled = !pres.active;
+  tweens.length = 0;
+  fxLight.intensity = 0;
+  bins.forEach((b) => { b.hold = 0; b.open = 0; b.openTarget = 0; b.wiggle = 0; b.shake = 0; });
+  state.score = 0; state.correct = 0; state.wrong = 0; state.finished = false;
+
+  // Posisi acak di plaza
+  const slots = [];
+  for (let r = 0; r < SLOT_ROWS; r++) for (let c = 0; c < SLOT_COLS; c++) slots.push([-6.5 + c * 2.6, 4.7 + r * 1.5]);
+  shuffle(slots);
+
+  ITEM_DEFS.forEach((def, i) => {
+    const g = BUILD[def.key]();
+    addOutlines(g);
+    shadowize(g, true, false);
+    const [sx, sz] = slots[i];
+    g.position.set(sx + rand(-0.3, 0.3), 0.06, sz + rand(-0.2, 0.2));
+    g.rotation.y += rand(0, Math.PI * 2);
+    scene.add(g);
+    const item = {
+      ...def, group: g, home: g.position.clone(), homeQuat: g.quaternion.clone(),
+      state: 'idle', scale: 1, glow: 0, glowTarget: 0, outlineOn: false, mats: collectMats(g),
+    };
+    g.userData.item = item;
+    items.push(item);
+    applyGLB(item);
+  });
+  updateHUD();
+  $('#hint').textContent = 'Pilih sampah dan masukkan ke tempat yang sesuai.';
+}
+
+function updateHUD(bump) {
+  $('#score').textContent = state.score;
+  $('#correct').textContent = state.correct;
+  $('#wrong').textContent = state.wrong;
+  $('#remain').textContent = items.filter((i) => i.state !== 'done').length;
+  if (bump) { const el = $('#' + bump); el.classList.remove('bump'); void el.offsetWidth; el.classList.add('bump'); }
+}
+
+/* ---------- Tween sederhana ---------- */
+const tweens = [];
+function tween(dur, onUpdate, onDone, delay = 0) { tweens.push({ t: -delay, dur, onUpdate, onDone }); }
+function updateTweens(dt) {
+  for (let i = tweens.length - 1; i >= 0; i--) {
+    const tw = tweens[i];
+    if (!tw) continue;
+    tw.t += dt;
+    if (tw.t < 0) continue;
+    const k = Math.min(1, tw.t / tw.dur);
+    tw.onUpdate && tw.onUpdate(k);
+    if (k >= 1) { const idx = tweens.indexOf(tw); if (idx >= 0) tweens.splice(idx, 1); tw.onDone && tw.onDone(); }
+  }
+}
+const quad = (a, b, c, t, out) => {
+  const u = 1 - t;
+  return out.set(u * u * a.x + 2 * u * t * b.x + t * t * c.x, u * u * a.y + 2 * u * t * b.y + t * t * c.y, u * u * a.z + 2 * u * t * b.z + t * t * c.z);
+};
+
+/* ---------- Suara (WebAudio, tanpa file) ---------- */
+let audioCtx = null, muted = false;
+function beep(freq, dur, type = 'sine', vol = 0.08, delay = 0) {
+  if (muted || !audioCtx) return;
+  const t = audioCtx.currentTime + delay;
+  const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+  o.type = type; o.frequency.setValueAtTime(freq, t);
+  g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(vol, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.connect(g).connect(audioCtx.destination); o.start(t); o.stop(t + dur + 0.03);
+}
+const sfx = {
+  pick() { beep(520, 0.08, 'triangle'); },
+  drop() { beep(300, 0.1, 'triangle', 0.06); },
+  ok() { beep(660, 0.12, 'sine', 0.1); beep(880, 0.2, 'sine', 0.1, 0.1); },
+  bad() { beep(190, 0.25, 'sawtooth', 0.06); beep(140, 0.3, 'sawtooth', 0.06, 0.13); },
+  warn() { beep(760, 0.12, 'square', 0.04); beep(760, 0.12, 'square', 0.04, 0.22); },
+  win() { [523, 659, 784, 1047].forEach((f, i) => beep(f, 0.28, 'sine', 0.1, i * 0.15)); },
+};
+
+/* ---------- Partikel (satu Points, shader ringan) ---------- */
+const MAXP = 140;
+const pPos = new Float32Array(MAXP * 3), pCol = new Float32Array(MAXP * 3), pSize = new Float32Array(MAXP), pAlpha = new Float32Array(MAXP);
+const pVel = new Float32Array(MAXP * 3), pLife = new Float32Array(MAXP), pMax = new Float32Array(MAXP), pGrav = new Float32Array(MAXP);
+let pNext = 0;
+const pGeo = new THREE.BufferGeometry();
+pGeo.setAttribute('position', new THREE.BufferAttribute(pPos, 3));
+pGeo.setAttribute('aColor', new THREE.BufferAttribute(pCol, 3));
+pGeo.setAttribute('aSize', new THREE.BufferAttribute(pSize, 1));
+pGeo.setAttribute('aAlpha', new THREE.BufferAttribute(pAlpha, 1));
+const pMat = new THREE.ShaderMaterial({
+  transparent: true, depthWrite: false,
+  uniforms: { uScale: { value: 400 } },
+  vertexShader: `attribute float aSize; attribute float aAlpha; attribute vec3 aColor; varying float vA; varying vec3 vC; uniform float uScale;
+    void main(){ vA=aAlpha; vC=aColor; vec4 mv=modelViewMatrix*vec4(position,1.0); gl_PointSize=aSize*uScale/max(0.1,-mv.z); gl_Position=projectionMatrix*mv; }`,
+  fragmentShader: `varying float vA; varying vec3 vC;
+    void main(){ float d=length(gl_PointCoord-0.5); if(d>0.5) discard; gl_FragColor=vec4(vC, smoothstep(0.5,0.28,d)*vA); }`,
+});
+const points = new THREE.Points(pGeo, pMat);
+points.frustumCulled = false; points.renderOrder = 5;
+scene.add(points);
+
+function spawnP(x, y, z, vx, vy, vz, life, size, hex, grav) {
+  const i = pNext; pNext = (pNext + 1) % MAXP;
+  pPos[i * 3] = x; pPos[i * 3 + 1] = y; pPos[i * 3 + 2] = z;
+  pVel[i * 3] = vx; pVel[i * 3 + 1] = vy; pVel[i * 3 + 2] = vz;
+  pLife[i] = pMax[i] = life; pSize[i] = size; pGrav[i] = grav; pAlpha[i] = 1;
+  pCol[i * 3] = ((hex >> 16) & 255) / 255; pCol[i * 3 + 1] = ((hex >> 8) & 255) / 255; pCol[i * 3 + 2] = (hex & 255) / 255;
+}
+function updateParticles(dt) {
+  for (let i = 0; i < MAXP; i++) {
+    if (pLife[i] <= 0) { pAlpha[i] = 0; continue; }
+    pLife[i] -= dt;
+    pVel[i * 3 + 1] += pGrav[i] * dt;
+    pPos[i * 3] += pVel[i * 3] * dt; pPos[i * 3 + 1] += pVel[i * 3 + 1] * dt; pPos[i * 3 + 2] += pVel[i * 3 + 2] * dt;
+    pAlpha[i] = pLife[i] <= 0 ? 0 : clamp((pLife[i] / pMax[i]) * 1.8, 0, 1);
+  }
+  pGeo.attributes.position.needsUpdate = true;
+  pGeo.attributes.aAlpha.needsUpdate = true;
+  pGeo.attributes.aColor.needsUpdate = true;
+  pGeo.attributes.aSize.needsUpdate = true;
+}
+function burst(cat, x, y, z) {
+  const P = {
+    organik:   { n: 26, cols: [0x4caf50, 0x8bc34a, 0x2e7d32, 0xa1887f], up: [2.2, 4], sp: 1.8, life: [0.9, 1.5], size: [0.16, 0.26], grav: -4.5 },
+    anorganik: { n: 24, cols: [0xffd23f, 0xfff3b0, 0xffffff, 0xf2b705], up: [1.5, 3.2], sp: 2.6, life: [0.7, 1.2], size: [0.12, 0.2], grav: -2.5 },
+    kertas:    { n: 24, cols: [0xffffff, 0xbcd8ff, 0x7fb2ff, 0xf1f5ff], up: [0.8, 2.2], sp: 1.6, life: [1.2, 1.9], size: [0.15, 0.25], grav: -0.9 },
+    b3:        { n: 20, cols: [0xff4040, 0xff8a3d, 0xffd23f], up: [0.8, 2.4], sp: 2.0, life: [0.9, 1.5], size: [0.14, 0.24], grav: -1.2 },
+    residu:    { n: 18, cols: [0x9aa0a8, 0xc7cbd1, 0x6b7078], up: [0.6, 1.6], sp: 1.2, life: [1.1, 1.8], size: [0.26, 0.4], grav: -0.2 },
+  }[cat];
+  for (let i = 0; i < P.n; i++) {
+    const a = Math.random() * 6.283, s = rand(0.3, 1) * P.sp;
+    spawnP(x + rand(-0.2, 0.2), y, z + rand(-0.2, 0.2), Math.cos(a) * s, rand(P.up[0], P.up[1]), Math.sin(a) * s,
+      rand(P.life[0], P.life[1]), rand(P.size[0], P.size[1]), P.cols[i % P.cols.length], P.grav);
+  }
+}
+
+/* ---------- Popup 3D (centang, silang, ikon) ---------- */
+const popups = [];
+const stroke = (ax, ay, bx, by, th, mat) => {
+  const len = Math.hypot(bx - ax, by - ay);
+  const m = new THREE.Mesh(new THREE.BoxGeometry(len + th, th, th * 0.8), mat);
+  m.position.set((ax + bx) / 2, (ay + by) / 2, 0); m.rotation.z = Math.atan2(by - ay, bx - ax);
+  return m;
+};
+function popMat(hex) { return new THREE.MeshStandardMaterial({ color: hex, emissive: hex, emissiveIntensity: 0.7, roughness: 0.4, transparent: true, depthTest: false }); }
+function makeCheck() { const g = new THREE.Group(); const m = popMat(0x2ecc71); g.add(stroke(-0.26, 0.0, -0.09, -0.2, 0.13, m), stroke(-0.09, -0.2, 0.3, 0.24, 0.13, m)); return g; }
+function makeCross() { const g = new THREE.Group(); const m = popMat(0xe74c3c); g.add(stroke(-0.25, -0.25, 0.25, 0.25, 0.13, m), stroke(-0.25, 0.25, 0.25, -0.25, 0.13, m)); return g; }
+function makeIconSprite(cat) {
+  const c = CATEGORIES[cat];
+  const tex = canvasTex(128, 128, (g) => {
+    if (cat === 'b3') {
+      g.fillStyle = '#ffd400'; g.strokeStyle = '#b71c1c'; g.lineWidth = 10; g.lineJoin = 'round';
+      g.beginPath(); g.moveTo(64, 8); g.lineTo(122, 112); g.lineTo(6, 112); g.closePath(); g.fill(); g.stroke();
+      g.fillStyle = '#b71c1c'; g.font = '800 72px Arial'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('!', 64, 78);
+    } else {
+      g.fillStyle = c.css; g.font = '100px "Segoe UI Emoji","Apple Color Emoji","Noto Color Emoji",Arial,sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.fillText(c.icon, 64, 72);
+    }
+  });
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false }));
+  sp.scale.set(1.0, 1.0, 1);
+  return sp;
+}
+function spawnPopup(obj, pos, { dur = 1.4, rise = 0.7, size = 1, billboard = true } = {}) {
+  obj.position.copy(pos); obj.renderOrder = 10;
+  obj.traverse((o) => { o.renderOrder = 10; });
+  scene.add(obj);
+  popups.push({ obj, t: 0, dur, rise, base: pos.clone(), size, billboard });
+}
+function updatePopups(dt) {
+  for (let i = popups.length - 1; i >= 0; i--) {
+    const p = popups[i]; p.t += dt;
+    const k = Math.min(1, p.t / p.dur);
+    const pop = k < 0.18 ? easeOut(k / 0.18) * 1.25 : lerp(1.25, 1, Math.min(1, (k - 0.18) / 0.15));
+    p.obj.scale.setScalar(Math.max(0.001, pop) * p.size);
+    p.obj.position.y = p.base.y + p.rise * easeOut(k);
+    if (p.billboard && !p.obj.isSprite) p.obj.quaternion.copy(camera.quaternion);
+    const op = k > 0.65 ? 1 - (k - 0.65) / 0.35 : 1;
+    p.obj.traverse((o) => { if (o.material) o.material.opacity = op; });
+    if (k >= 1) {
+      scene.remove(p.obj);
+      p.obj.traverse((o) => { if (o.geometry) o.geometry.dispose(); if (o.material) { if (o.material.map) o.material.map.dispose(); o.material.dispose(); } });
+      popups.splice(i, 1);
+    }
+  }
+}
+function recycleRing(bin) {
+  const m = new THREE.Mesh(new THREE.TorusGeometry(0.55, 0.05, 8, 32), new THREE.MeshBasicMaterial({ color: 0xffd23f, transparent: true, depthTest: false }));
+  const pos = bin.group.position.clone(); pos.y = 2.4;
+  m.rotation.x = Math.PI / 2;
+  spawnPopup(m, pos, { dur: 1.0, rise: 0.5, billboard: false });
+  const pp = popups[popups.length - 1];
+  const old = pp.obj; // rotasi cincin ditangani lewat tween
+  tween(1.0, (k) => { old.rotation.z = k * Math.PI * 3; old.rotation.x = Math.PI / 2 + Math.sin(k * 6) * 0.2; });
+}
+
+/* ---------- Toast & teks melayang ---------- */
+let toastTimer = null;
+function showToast(type, title, msg, info, pts) {
+  const t = $('#toast');
+  t.className = 'toast show ' + type;
+  t.innerHTML = `<div class="t-title">${title}</div><div class="t-msg">${msg}</div>` +
+    (info ? `<div class="t-info">${info}</div>` : '') + (pts ? `<div class="t-points">${pts}</div>` : '');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 3600);
+}
+function worldToScreen(v) {
+  const p = v.clone().project(camera);
+  return { x: (p.x * 0.5 + 0.5) * window.innerWidth, y: (-p.y * 0.5 + 0.5) * window.innerHeight };
+}
+function floatText(text, worldPos) {
+  const s = worldToScreen(worldPos);
+  const el = document.createElement('div');
+  el.className = 'float-pt'; el.textContent = text;
+  el.style.left = s.x + 'px'; el.style.top = s.y + 'px';
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 1500);
+}
+
+/* ---------- Aksi: masuk benar / salah / kembali ---------- */
+function flyIn(item, bin) {
+  const g = item.group, fx = CAT_FX[item.cat];
+  item.state = 'flying';
+  setOutline(item, true);
+  item.glowTarget = 1;
+  const start = g.position.clone();
+  const top = new THREE.Vector3(bin.group.position.x, 2.15, bin.group.position.z);
+  const ctrl = start.clone().lerp(top, 0.5); ctrl.y = Math.max(start.y, top.y) + 1.4;
+  const rot0 = g.rotation.clone(); const s0 = item.scale;
+  bin.hold++;
+  if (item.cat === 'b3') { sfx.warn(); pulseWarning(bin, 1.6); const ic = makeIconSprite('b3'); spawnPopup(ic, new THREE.Vector3(bin.group.position.x, 2.9, bin.group.position.z), { dur: 1.7, rise: 0.4, size: 1.0 }); }
+  sfx.drop();
+
+  tween(fx.fly, (k) => {
+    const e = easeInOut(k);
+    quad(start, ctrl, top, e, g.position);
+    if (fx.wobble) { g.position.x += Math.sin(k * Math.PI * 5) * fx.wobble * (1 - k); g.position.y += Math.sin(k * Math.PI * 3) * 0.12; }
+    g.rotation.set(lerp(rot0.x, 0, e), rot0.y + e * fx.spin, lerp(rot0.z, 0, e));
+    item.scale = lerp(s0, 0.75, e); g.scale.setScalar(item.scale);
+  }, () => {
+    const y1 = top.y, spinEnd = rot0.y + fx.spin;
+    tween(fx.drop, (k) => {
+      const e = k * k;
+      g.position.set(top.x, lerp(y1, 0.95, e), top.z);
+      g.rotation.y = spinEnd + k * 1.6;
+      item.scale = lerp(0.75, 0.4, e); g.scale.setScalar(item.scale);
+    }, () => {
+      g.visible = false; item.state = 'done'; bin.hold = Math.max(0, bin.hold - 1);
+      celebrate(item, bin);
+    });
+  });
+}
+
+function celebrate(item, bin) {
+  const c = CATEGORIES[item.cat];
+  state.score += 10; state.correct++;
+  updateHUD('correct');
+  const bp = bin.group.position;
+  bin.wiggle = 1;
+  burst(item.cat, bp.x, 1.9, bp.z);
+  spawnPopup(makeCheck(), new THREE.Vector3(bp.x, 2.7, bp.z), { dur: 1.5, rise: 0.7, size: 1.15 });
+  if (item.cat === 'anorganik') recycleRing(bin);
+  if (item.cat === 'organik') { const ic = makeIconSprite('organik'); spawnPopup(ic, new THREE.Vector3(bp.x + 0.7, 2.5, bp.z), { dur: 1.2, rise: 0.6, size: 0.7 }); }
+  if (item.cat === 'residu') bin.wiggle = 0.7;
+  sfx.ok();
+  floatText('+10 POIN', new THREE.Vector3(bp.x, 3.1, bp.z));
+  showToast('ok', 'BENAR!', `${item.name} ${c.tail}`,
+    `<b>${c.title}</b> — ${c.desc}`, '+10 POIN');
+  updateHUD();
+  const left = items.filter((i) => i.state !== 'done').length;
+  if (left === 0) setTimeout(finishGame, 1300);
+}
+
+function wrongDrop(item, bin) {
+  state.wrong++; updateHUD('wrong');
+  const g = item.group, bp = bin.group.position;
+  item.state = 'returning';
+  bin.shake = 1;
+  spawnPopup(makeCross(), new THREE.Vector3(bp.x, 2.7, bp.z), { dur: 1.4, rise: 0.5, size: 1.15 });
+  sfx.bad();
+  showToast('no', 'BELUM TEPAT', 'Sampah ini termasuk kategori lain.', 'Coba lagi! Lihat <b>papan informasi</b> untuk mengenali warna tempat sampah.', null);
+  const p0 = g.position.clone();
+  // Efek shake lalu kembali
+  tween(0.4, (k) => { g.position.x = p0.x + Math.sin(k * 60) * 0.12 * (1 - k); }, () => returnHome(item));
+}
+
+function returnHome(item) {
+  const g = item.group;
+  item.state = 'returning';
+  const start = g.position.clone(), end = item.home.clone();
+  const ctrl = start.clone().lerp(end, 0.5); ctrl.y = Math.max(start.y, end.y) + 1.1;
+  const q0 = g.quaternion.clone(); const s0 = item.scale;
+  item.glowTarget = 0;
+  tween(0.75, (k) => {
+    const e = easeInOut(k);
+    quad(start, ctrl, end, e, g.position);
+    g.quaternion.slerpQuaternions(q0, item.homeQuat, e);
+    item.scale = lerp(s0, 1, e); g.scale.setScalar(item.scale);
+  }, () => { g.position.copy(item.home); g.quaternion.copy(item.homeQuat); item.state = 'idle'; item.scale = 1; g.scale.setScalar(1); setOutline(item, false); });
+}
+
+function pulseWarning(bin, dur) {
+  const bp = bin.group.position;
+  fxLight.position.set(bp.x, 2.4, bp.z + 1.2);
+  fxLight.color.set(0xff2a2a);
+  tween(dur, (k) => { fxLight.intensity = (0.5 + 0.5 * Math.sin(k * 26)) * 22 * (1 - k * 0.6); bin.glow = 0.7 * (1 - k); }, () => { fxLight.intensity = 0; bin.glow = 0; });
+}
+
+function finishGame() {
+  state.finished = true;
+  const total = state.correct + state.wrong;
+  const acc = total ? Math.round((state.correct / total) * 100) : 0;
+  $('#f-score').textContent = state.score;
+  $('#f-correct').textContent = state.correct;
+  $('#f-wrong').textContent = state.wrong;
+  $('#f-acc').textContent = acc + '%';
+  $('#finish').classList.remove('hidden');
+  sfx.win();
+  bins.forEach((b, i) => setTimeout(() => { b.wiggle = 1; burst(b.cat, b.group.position.x, 1.9, 0); }, i * 160));
+}
+
+/* ---------------------------------------------------------------------
+   8. INTERAKSI (hover, ambil, seret, lepas)
+--------------------------------------------------------------------- */
+const raycaster = new THREE.Raycaster();
+const mouse = new THREE.Vector2();
+const dragPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -DRAG_Y);
+const dragTarget = new THREE.Vector3();
+let hovered = null, dragging = null;
+const el = renderer.domElement;
+
+function setPointer(e) {
+  const r = el.getBoundingClientRect();
+  mouse.x = ((e.clientX - r.left) / r.width) * 2 - 1;
+  mouse.y = -((e.clientY - r.top) / r.height) * 2 + 1;
+}
+function pickItem() {
+  raycaster.setFromCamera(mouse, camera);
+  const objs = items.filter((i) => i.state === 'idle').map((i) => i.group);
+  const hits = raycaster.intersectObjects(objs, true);
+  for (const h of hits) {
+    let o = h.object;
+    while (o && !o.userData.item) o = o.parent;
+    if (o) return o.userData.item;
+  }
+  return null;
+}
+const canInteract = () => state.started && !state.finished && !pres.active;
+
+// Didaftarkan di container (fase capture) agar selalu berjalan sebelum OrbitControls
+app.addEventListener('pointerdown', (e) => {
+  if (e.target !== el || !canInteract() || (e.pointerType === 'mouse' && e.button !== 0)) return;
+  setPointer(e);
+  const it = pickItem();
+  if (!it) return;
+  hovered = null;
+  dragging = it; it.state = 'drag';
+  controls.enabled = false;
+  try { el.setPointerCapture(e.pointerId); } catch (_) { /* abaikan */ }
+  setOutline(it, true); it.glowTarget = 1;
+  el.style.cursor = 'grabbing';
+  sfx.pick();
+  $('#hint').textContent = `${it.name} — seret ke tempat sampah yang sesuai, lalu lepaskan.`;
+  e.stopPropagation();
+}, true);
+
+el.addEventListener('pointermove', (e) => {
+  setPointer(e);
+  if (dragging || !canInteract() || e.pointerType !== 'mouse' || e.buttons) return;
+  const it = pickItem();
+  if (it !== hovered) { hovered = it; el.style.cursor = it ? 'pointer' : ''; }
+});
+
+function endDrag() {
+  if (!dragging) return;
+  const it = dragging; dragging = null;
+  controls.enabled = !pres.active;
+  el.style.cursor = hovered ? 'pointer' : '';
+  const p = it.group.position;
+  let best = null, bd = 1.5;
+  for (const b of bins) { const d = Math.hypot(p.x - b.group.position.x, p.z - b.group.position.z); if (d < bd) { bd = d; best = b; } }
+  bins.forEach((b) => { b.near = 0; });
+  if (!best) { returnHome(it); $('#hint').textContent = 'Pilih sampah dan masukkan ke tempat yang sesuai.'; return; }
+  if (best.cat === it.cat) flyIn(it, best); else wrongDrop(it, best);
+  $('#hint').textContent = 'Pilih sampah dan masukkan ke tempat yang sesuai.';
+}
+window.addEventListener('pointerup', endDrag);
+window.addEventListener('pointercancel', endDrag);
+
+function updateDrag(dt) {
+  if (!dragging) return;
+  raycaster.setFromCamera(mouse, camera);
+  if (raycaster.ray.intersectPlane(dragPlane, dragTarget)) {
+    dragTarget.x = clamp(dragTarget.x, -24, 24);
+    dragTarget.z = clamp(dragTarget.z, -10, 26);
+    const g = dragging.group;
+    g.position.lerp(dragTarget, 1 - Math.exp(-dt * 16));
+    g.rotation.y += dt * 1.4;
+  }
+  // Tempat sampah terdekat membuka lubangnya
+  const p = dragging.group.position;
+  let best = null, bd = 1.5;
+  for (const b of bins) { const d = Math.hypot(p.x - b.group.position.x, p.z - b.group.position.z); if (d < bd) { bd = d; best = b; } }
+  bins.forEach((b) => { b.near = b === best ? 1 : 0; });
+}
+
+/* ---------------------------------------------------------------------
+   9. KAMERA: keyboard, joystick virtual, reset
+--------------------------------------------------------------------- */
+const keys = new Set();
+const keyMap = { KeyW: 'up', ArrowUp: 'up', KeyS: 'down', ArrowDown: 'down', KeyA: 'left', ArrowLeft: 'left', KeyD: 'right', ArrowRight: 'right' };
+window.addEventListener('keydown', (e) => {
+  if (e.code === 'Escape' && pres.active) { stopPresentation(); return; }
+  const k = keyMap[e.code];
+  if (!k || !state.started) return;
+  keys.add(k);
+  if (e.code.startsWith('Arrow')) e.preventDefault();
+});
+window.addEventListener('keyup', (e) => { const k = keyMap[e.code]; if (k) keys.delete(k); });
+window.addEventListener('blur', () => keys.clear());
+
+document.querySelectorAll('#dpad button').forEach((b) => {
+  const k = b.dataset.key;
+  const on = (e) => { e.preventDefault(); keys.add(k); };
+  const off = (e) => { e.preventDefault(); keys.delete(k); };
+  b.addEventListener('pointerdown', on); b.addEventListener('pointerup', off);
+  b.addEventListener('pointerleave', off); b.addEventListener('pointercancel', off);
+});
+
+const _f = new THREE.Vector3(), _r = new THREE.Vector3(), _d = new THREE.Vector3();
+function updateMovement(dt) {
+  if (pres.active || !keys.size || !state.started) return;
+  camera.getWorldDirection(_f); _f.y = 0; _f.normalize();
+  _r.crossVectors(_f, camera.up).normalize();
+  _d.set(0, 0, 0);
+  if (keys.has('up')) _d.add(_f);
+  if (keys.has('down')) _d.sub(_f);
+  if (keys.has('right')) _d.add(_r);
+  if (keys.has('left')) _d.sub(_r);
+  if (_d.lengthSq() === 0) return;
+  _d.normalize().multiplyScalar(9 * dt);
+  camera.position.add(_d); controls.target.add(_d);
+}
+const _before = new THREE.Vector3();
+function clampTarget() {
+  const t = controls.target;
+  _before.copy(t);
+  t.set(clamp(t.x, -30, 30), clamp(t.y, 0, 4), clamp(t.z, -20, 26));
+  _before.sub(t).negate();
+  if (_before.lengthSq() > 0) camera.position.add(_before);
+  if (camera.position.y < 0.5) camera.position.y = 0.5;
+}
+
+function resetCamera() {
+  if (pres.active) return;
+  const p0 = camera.position.clone(), t0 = controls.target.clone();
+  tween(0.9, (k) => {
+    const e = easeInOut(k);
+    camera.position.lerpVectors(p0, CAM_START.pos, e);
+    controls.target.lerpVectors(t0, CAM_START.target, e);
+  });
+}
+
+/* ---------------------------------------------------------------------
+   10. MODE PRESENTASI (kamera sinematik)
+--------------------------------------------------------------------- */
+const pres = { active: false, idx: 0, t: 0, time: 0, paused: false, look: new THREE.Vector3(), seg: 5.5 };
+const _pp = new THREE.Vector3(), _pl = new THREE.Vector3();
+
+function showPresCard() {
+  const countEl = $('#pres-count'), title = $('#pres-title'), desc = $('#pres-desc'), ex = $('#pres-ex'), card = $('.pres-card');
+  if (pres.idx === 0) {
+    countEl.textContent = 'GAMBARAN UMUM';
+    title.textContent = '5 JENIS TEMPAT SAMPAH';
+    desc.textContent = '5 JENIS SAMPAH, 5 TEMPAT, 1 LINGKUNGAN YANG LEBIH BERSIH.';
+    ex.innerHTML = ORDER.map((c) => `<span style="background:${CATEGORIES[c].css}">${CATEGORIES[c].colorName} = ${CATEGORIES[c].label.split(' ')[0]}</span>`).join('');
+    card.style.setProperty('--pc', '#fff');
+  } else {
+    const cat = ORDER[pres.idx - 1], c = CATEGORIES[cat];
+    countEl.textContent = `${pres.idx} / 5  •  TEMPAT SAMPAH ${c.colorName}`;
+    title.textContent = c.title;
+    desc.textContent = c.desc;
+    ex.innerHTML = PRES_INFO[cat].map((n) => `<span>${n}</span>`).join('');
+    card.style.setProperty('--pc', c.css);
+  }
+  card.style.animation = 'none'; void card.offsetWidth; card.style.animation = '';
+}
+
+function startPresentation() {
+  if (pres.active || !state.started) return;
+  pres.active = true; pres.idx = 0; pres.t = 0; pres.time = 0; pres.paused = false;
+  pres.look.copy(controls.target);
+  controls.enabled = false;
+  keys.clear();
+  if (dragging) { const it = dragging; dragging = null; returnHome(it); }
+  document.body.classList.add('presenting');
+  $('#pres').classList.remove('hidden');
+  $('#btn-pause').textContent = '⏸';
+  $('#toast').classList.remove('show');
+  showPresCard();
+}
+function stopPresentation() {
+  if (!pres.active) return;
+  pres.active = false;
+  controls.target.copy(pres.look);
+  controls.enabled = true;
+  controls.update();
+  document.body.classList.remove('presenting');
+  $('#pres').classList.add('hidden');
+  bins.forEach((b) => { b.glow = 0; });
+}
+function presGo(delta) {
+  pres.idx = (pres.idx + delta + 6) % 6; pres.t = 0; showPresCard();
+}
+function updatePresentation(dt) {
+  if (!pres.active) return;
+  pres.time += dt;
+  if (!pres.paused) { pres.t += dt; if (pres.t > (pres.idx === 0 ? 4.5 : pres.seg)) presGo(1); }
+
+  if (pres.idx === 0) {
+    const a = pres.time * 0.14;
+    _pp.set(Math.sin(a) * 4.5, 3.8 + Math.sin(pres.time * 0.3) * 0.35, 10.5 + Math.cos(a) * 0.8);
+    _pl.set(0, 1.0, 0);
+  } else {
+    const b = bins[pres.idx - 1], a = pres.time * 0.28;
+    _pp.set(b.baseX + Math.sin(a) * 2.3, 2.1 + Math.sin(a * 0.7) * 0.3, 4.3 + Math.cos(a) * 0.5);
+    _pl.set(b.baseX, 0.95, 0);
+  }
+  camera.position.lerp(_pp, 1 - Math.exp(-dt * 1.7));
+  pres.look.lerp(_pl, 1 - Math.exp(-dt * 2.4));
+  camera.lookAt(pres.look);
+}
+
+/* ---------------------------------------------------------------------
+   11. ANIMASI IDLE / UPDATE PER FRAME
+--------------------------------------------------------------------- */
+let T = 0;
+function updateEnvironment(dt) {
+  envAnim.grassU.value = T;
+  envAnim.trees.forEach((t) => { t.fol.rotation.z = Math.sin(T * 0.8 + t.phase) * t.amp; t.fol.rotation.x = Math.cos(T * 0.65 + t.phase) * t.amp * 0.7; });
+  envAnim.clouds.forEach((c) => { c.position.x += c.userData.speed * dt; if (c.position.x > 80) c.position.x = -80; });
+  const f = envAnim.flag;
+  if (f) {
+    const pos = f.geometry.attributes.position, base = f.userData.base;
+    for (let i = 0; i < pos.count; i++) {
+      const x = base[i * 3] + 1.2; // 0..2.4
+      pos.array[i * 3 + 2] = Math.sin(x * 2.4 - T * 4) * 0.12 * (x / 2.4);
+    }
+    pos.needsUpdate = true;
+  }
+}
+
+function updateBins(dt) {
+  const k = 1 - Math.exp(-dt * 10);
+  bins.forEach((b, i) => {
+    // idle: bergoyang sangat pelan
+    let rz = Math.sin(T * 1.3 + b.phase) * 0.012, rx = Math.cos(T * 1.1 + b.phase) * 0.008;
+    b.wiggle *= Math.exp(-dt * 3.2);
+    rz += Math.sin(T * 30) * b.wiggle * 0.07;
+    b.shake *= Math.exp(-dt * 3.6);
+    b.group.position.x = b.baseX + Math.sin(T * 48) * b.shake * 0.07;
+    b.group.rotation.set(rx, 0, rz);
+    // tutup/lubang
+    b.openTarget = b.hold > 0 ? 1 : b.near ? 0.75 : 0;
+    b.open += (b.openTarget - b.open) * k;
+    b.flap.rotation.x = -1.35 * b.open;
+    // glow / cincin
+    const pulse = 0.5 + 0.5 * Math.sin(T * 5);
+    const target = Math.max(b.glow, b.near * 0.6);
+    b.bodyMat.emissiveIntensity = target * (0.25 + pulse * 0.3);
+    b.ring.material.opacity = clamp(target * (0.55 + pulse * 0.3), 0, 1);
+    const sc = 1 + target * 0.04;
+    b.group.scale.setScalar(sc);
+  });
+}
+
+function updateItems(dt) {
+  items.forEach((it) => {
+    if (it.state === 'done') return;
+    if (it.state === 'idle') {
+      const isH = it === hovered;
+      it.glowTarget = isH ? 0.8 : 0;
+      setOutline(it, isH);
+      const s = lerp(it.scale, isH ? 1.15 : 1, 1 - Math.exp(-dt * 12));
+      it.scale = s; it.group.scale.setScalar(s);
+    } else if (it.state === 'drag') {
+      it.scale = lerp(it.scale, 1.2, 1 - Math.exp(-dt * 10)); it.group.scale.setScalar(it.scale);
+    }
+    setItemGlow(it, lerp(it.glow, it.glowTarget, 1 - Math.exp(-dt * 12)));
+  });
+}
+
+/* ---------------------------------------------------------------------
+   12. UI & EVENT
+--------------------------------------------------------------------- */
+function openOverlay(id) { $(id).classList.remove('hidden'); }
+function closeOverlay(id) { $(id).classList.add('hidden'); }
+
+$('#btn-start').addEventListener('click', () => {
+  try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (_) { audioCtx = null; }
+  state.started = true;
+  closeOverlay('#start');
+  sfx.pick();
+});
+$('#btn-help').addEventListener('click', () => openOverlay('#help'));
+$('#btn-help-close').addEventListener('click', () => closeOverlay('#help'));
+$('#btn-reset').addEventListener('click', () => { closeOverlay('#finish'); newGame(); });
+$('#btn-again').addEventListener('click', () => { closeOverlay('#finish'); newGame(); resetCamera(); });
+$('#btn-cam').addEventListener('click', resetCamera);
+$('#btn-pres').addEventListener('click', startPresentation);
+$('#btn-exit-pres').addEventListener('click', stopPresentation);
+$('#btn-prev').addEventListener('click', () => presGo(-1));
+$('#btn-next').addEventListener('click', () => presGo(1));
+$('#btn-pause').addEventListener('click', () => { pres.paused = !pres.paused; $('#btn-pause').textContent = pres.paused ? '▶' : '⏸'; });
+$('#btn-sound').addEventListener('click', () => { muted = !muted; $('#btn-sound').textContent = muted ? '🔇' : '🔊'; });
+
+function onResize() {
+  const w = window.innerWidth, h = window.innerHeight;
+  renderer.setSize(w, h);
+  camera.aspect = w / h;
+  camera.fov = camera.aspect < 0.8 ? 68 : camera.aspect < 1.2 ? 58 : 52;
+  camera.updateProjectionMatrix();
+  pMat.uniforms.uScale.value = renderer.domElement.height / (2 * Math.tan((camera.fov * Math.PI) / 360));
+}
+window.addEventListener('resize', onResize);
+
+/* ---------------------------------------------------------------------
+   13. MULAI
+--------------------------------------------------------------------- */
+buildEnvironment();
+bins.length = 0;
+ORDER.forEach((cat, i) => createBin(cat, -6 + i * 3));
+newGame();
+onResize();
+
+const clock = new THREE.Clock();
+function animate() {
+  requestAnimationFrame(animate);
+  const dt = Math.min(clock.getDelta(), 0.05);
+  T += dt;
+
+  updateTweens(dt);
+  updateMovement(dt);
+  updateDrag(dt);
+  updateItems(dt);
+  updateBins(dt);
+  updateParticles(dt);
+  updatePopups(dt);
+  updateEnvironment(dt);
+
+  if (pres.active) updatePresentation(dt);
+  else { clampTarget(); controls.update(); }
+
+  renderer.render(scene, camera);
+}
+animate();
+requestAnimationFrame(() => requestAnimationFrame(() => $('#loading').classList.add('done')));

@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <title>Project Kokurikuler 3D – Pemilahan Sampah</title>
+  <meta name="description" content="Mini game edukasi 3D: pilah 5 jenis sampah ke 5 tempat sampah yang tepat.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+
+  <!-- Three.js dimuat dari CDN (butuh internet saat pertama kali dibuka) -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <div id="app"></div>
+
+  <!-- Loading -->
+  <div id="loading"><div class="spinner"></div><p>Memuat lingkungan 3D…</p></div>
+
+  <!-- Layar awal -->
+  <div id="start" class="overlay">
+    <div class="card start-card">
+      <div class="badge">♻️ MINI GAME EDUKASI 3D</div>
+      <h1>PROJECT KOKURIKULER 3D</h1>
+      <h2>PEMILAHAN SAMPAH</h2>
+      <p class="tagline">5 JENIS SAMPAH, 5 TEMPAT, 1 LINGKUNGAN YANG LEBIH BERSIH.</p>
+      <div class="bin-dots">
+        <span style="--c:#2e9e4f">ORGANIK</span>
+        <span style="--c:#f2b705">ANORGANIK</span>
+        <span style="--c:#2f7de1">KERTAS</span>
+        <span style="--c:#d93636">B3</span>
+        <span style="--c:#4a4f57">RESIDU</span>
+      </div>
+      <button id="btn-start" class="btn primary big">▶ MULAI BERMAIN</button>
+      <p class="small">Seret sampah 3D ke tempat sampah yang sesuai.</p>
+    </div>
+  </div>
+
+  <!-- HUD -->
+  <header class="hud top">
+    <div class="brand">PROJECT PEMILAHAN SAMPAH 3D</div>
+  </header>
+
+  <aside class="hud stats">
+    <div class="stat"><span>SKOR</span><b id="score">0</b></div>
+    <div class="stat good"><span>BENAR</span><b id="correct">0</b></div>
+    <div class="stat bad"><span>SALAH</span><b id="wrong">0</b></div>
+    <div class="stat rest"><span>SISA</span><b id="remain">25</b></div>
+  </aside>
+
+  <div id="toast" class="toast"></div>
+
+  <footer class="hud bottom">
+    <p id="hint">Pilih sampah dan masukkan ke tempat yang sesuai.</p>
+    <div class="buttons">
+      <button id="btn-help" class="btn">❓ PETUNJUK</button>
+      <button id="btn-reset" class="btn">⟲ RESET</button>
+      <button id="btn-cam" class="btn">🎥 RESET CAMERA</button>
+      <button id="btn-pres" class="btn accent">🎬 MODE PRESENTASI</button>
+      <button id="btn-sound" class="btn icon" title="Suara">🔊</button>
+    </div>
+  </footer>
+
+  <!-- Tombol gerak virtual (mobile) -->
+  <div id="dpad" class="hud">
+    <button data-key="up">▲</button>
+    <button data-key="left">◀</button>
+    <button data-key="down">▼</button>
+    <button data-key="right">▶</button>
+  </div>
+
+  <!-- Mode presentasi -->
+  <div id="pres" class="hidden">
+    <div class="pres-card">
+      <div class="pres-count" id="pres-count"></div>
+      <h3 id="pres-title"></h3>
+      <p id="pres-desc"></p>
+      <div id="pres-ex" class="chips"></div>
+      <div class="pres-nav">
+        <button id="btn-prev" class="btn">◀</button>
+        <button id="btn-pause" class="btn">⏸</button>
+        <button id="btn-next" class="btn">▶</button>
+        <button id="btn-exit-pres" class="btn accent">✕ KELUAR</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Petunjuk -->
+  <div id="help" class="overlay hidden">
+    <div class="card">
+      <h2>❓ PETUNJUK</h2>
+      <ul class="help-list">
+        <li><b>Putar kamera:</b> klik &amp; drag (mobile: geser jari) pada area kosong.</li>
+        <li><b>Zoom:</b> scroll mouse (mobile: cubit dua jari).</li>
+        <li><b>Bergerak:</b> tombol <b>W A S D</b> / panah (mobile: tombol ▲◀▼▶). Klik kanan + drag untuk menggeser.</li>
+        <li><b>Ambil sampah:</b> arahkan kursor ke sampah 3D, tekan &amp; tahan, lalu seret.</li>
+        <li><b>Masukkan:</b> lepaskan sampah tepat di atas tempat sampah yang sesuai.</li>
+        <li><b>Benar</b> = +10 poin. <b>Salah</b> = sampah kembali ke tempat semula.</li>
+        <li>Lihat <b>papan informasi</b> di sisi kiri jika bingung dengan warna tempat sampah.</li>
+      </ul>
+      <div class="legend">
+        <div><i style="background:#2e9e4f"></i>HIJAU = ORGANIK</div>
+        <div><i style="background:#f2b705"></i>KUNING = ANORGANIK</div>
+        <div><i style="background:#2f7de1"></i>BIRU = KERTAS</div>
+        <div><i style="background:#d93636"></i>MERAH = B3</div>
+        <div><i style="background:#4a4f57"></i>ABU-ABU = RESIDU</div>
+      </div>
+      <button id="btn-help-close" class="btn primary">MENGERTI</button>
+    </div>
+  </div>
+
+  <!-- Layar selesai -->
+  <div id="finish" class="overlay hidden">
+    <div class="card finish-card">
+      <div class="trophy">🏆</div>
+      <h1>SELAMAT!</h1>
+      <h2>SEMUA SAMPAH BERHASIL DIPILAH</h2>
+      <p class="tagline">Pemilahan sampah dimulai dari kebiasaan sederhana.</p>
+      <div class="final-grid">
+        <div><span>SKOR AKHIR</span><b id="f-score">0</b></div>
+        <div><span>JUMLAH BENAR</span><b id="f-correct">0</b></div>
+        <div><span>JUMLAH SALAH</span><b id="f-wrong">0</b></div>
+        <div><span>AKURASI</span><b id="f-acc">0%</b></div>
+      </div>
+      <button id="btn-again" class="btn primary big">▶ MAIN LAGI</button>
+    </div>
+  </div>
+
+  <script type="module" src="script.js"></script>
+</body>
+</html>
